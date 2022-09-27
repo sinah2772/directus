@@ -52,7 +52,7 @@ export default abstract class SocketController {
 				try {
 					const _req = await emitter.emitFilter('websocket.upgrade', req, { config: this.config });
 					if (this.config.auth.mode === 'handshake') {
-						await this.handleHandshake(ws, this.config.auth.timeout);
+						_req.accountability = await this.handleHandshake(ws, this.config.auth.timeout);
 					}
 					this.server.emit('connection', ws, _req);
 				} catch (error: any) {
