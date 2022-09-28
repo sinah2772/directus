@@ -71,11 +71,11 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 		let subscriptionId: number | null = null
 
 		ws.onConnect((client) => {
-			watch([sort, limit, page, fields, filter, search], ([newSort, newLimit, newPage, newFields, newFilter, newSearch]) => {
+			watch([collection, sort, limit, page, fields, filter, search], ([collection, newSort, newLimit, newPage, newFields, newFilter, newSearch]) => {
 				if(subscriptionId !== null) client.unsubscribe(subscriptionId);
 	
 				subscriptionId = client.subscribe({
-					collection: collection.value!,
+					collection: collection!,
 					query: {
 						sort: newSort,
 						limit: newLimit,
