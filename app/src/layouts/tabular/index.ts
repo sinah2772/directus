@@ -11,13 +11,13 @@ import { useCollection, useItems, useSync } from '@directus/shared/composables';
 import { Field } from '@directus/shared/types';
 import { defineLayout } from '@directus/shared/utils';
 import { clone, debounce } from 'lodash';
-import { computed, ref, toRefs, watch } from 'vue';
+import { computed, onUnmounted, ref, toRefs, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import TabularActions from './actions.vue';
 import TabularOptions from './options.vue';
 import TabularLayout from './tabular.vue';
 import { LayoutOptions, LayoutQuery } from './types';
-import { subscribe, unsubscribe } from '@/websocket';
+import { getWebSocket } from '@/websocket';
 
 export default defineLayout<LayoutOptions, LayoutQuery>({
 	id: 'tabular',
@@ -66,26 +66,34 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			}
 		);
 
+		const ws = getWebSocket()
+
 		let subscriptionId: number | null = null
 
-		watch([sort, limit, page, fields, filter, search], ([newSort, newLimit, newPage, newFields, newFilter, newSearch]) => {
-			if(subscriptionId !== null) unsubscribe(subscriptionId);
+		ws.onConnect((client) => {
+			watch([sort, limit, page, fields, filter, search], ([newSort, newLimit, newPage, newFields, newFilter, newSearch]) => {
+				if(subscriptionId !== null) client.unsubscribe(subscriptionId);
+	
+				subscriptionId = client.subscribe({
+					collection: collection.value!,
+					query: {
+						sort: newSort,
+						limit: newLimit,
+						page: newPage,
+						fields: newFields,
+						filter: newFilter,
+						search: newSearch,
+					}
+				}, (data) => {
+					console.log("Data Changed!!!", data)
+					items.value = data.payload
+				})
+			}, {immediate: true})
 
-			subscriptionId = subscribe({
-				collection: collection.value!,
-				query: {
-					sort: newSort,
-					limit: newLimit,
-					page: newPage,
-					fields: newFields,
-					filter: newFilter,
-					search: newSearch,
-				}
-			}, (data) => {
-				console.log("Data Changed!!!", data)
-				items.value = data.payload
+			onUnmounted(() => {
+				if(subscriptionId !== null) client.unsubscribe(subscriptionId);
 			})
-		}, {immediate: true})
+		})
 
 		const {
 			tableSort,
