@@ -6,6 +6,7 @@ import env from '../../env';
 import { refreshAccountability } from '../utils';
 import SocketController from './base';
 import emitter from '../../emitter';
+import { errorMessage } from '../utils/message';
 
 function getEnvConfig(): SocketControllerConfig {
 	const endpoint: string = env['WEBSOCKETS_REST_PATH'];
@@ -44,14 +45,14 @@ export class WebsocketController extends SocketController {
 				client.accountability = await refreshAccountability(client.accountability);
 			} catch (err: any) {
 				logger.error(err);
-				client.send(err.message);
+				client.send(errorMessage(err.message));
 				return;
 			}
 			try {
 				emitter.emitAction('websocket.message', { message, client, config: this.config });
 			} catch (err: any) {
 				logger.error(err);
-				client.send(JSON.stringify({ error: err.message }));
+				client.send(errorMessage(err.message));
 			}
 		});
 		ws.addEventListener('error', (event: WebSocket.Event) => {

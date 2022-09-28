@@ -6,10 +6,12 @@ import type { WebsocketClient } from '../types';
 export const trimUpper = (str: string) => str.trim().toUpperCase();
 export const stringify = (msg: any) => (typeof msg === 'string' ? msg : JSON.stringify(msg));
 
-export const fmtMessage = (type: string, data: Record<string, any> = {}) => {
-	return JSON.stringify({ type, ...data });
+export const fmtMessage = (type: string, data: Record<string, any> = {}, uid?: string) => {
+	return JSON.stringify({ type, ...data, ...(uid ? { uid } : {}) });
 };
-export const errorMessage = (error: any) => JSON.stringify({ error });
+export const errorMessage = (error: any, uid?: string) => {
+	return JSON.stringify({ error, ...(uid ? { uid } : {}) });
+};
 
 // we may need this later for slow connections
 export const safeSend = async (client: WebsocketClient, data: string, delay = 100) => {

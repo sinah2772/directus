@@ -19,6 +19,7 @@ export type SocketControllerConfig = {
 export type WebsocketClient = WebSocket & { accountability: Accountability };
 
 export type Subscription = {
+	uid?: string;
 	query?: Query;
 	client: WebsocketClient;
 };

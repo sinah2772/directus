@@ -5,7 +5,9 @@ import type { Query } from '@directus/shared/types';
 import emitter from '../../emitter';
 import logger from '../../logger';
 import { refreshAccountability } from '../utils/refresh-accountability';
-import { errorMessage, trimUpper } from '../utils/message';
+import { errorMessage, fmtMessage, trimUpper } from '../utils/message';
+
+type SubscriptionConfig = { query?: Query; uid?: string };
 
 export class SubscribeHandler {
 	subscriptions: SubscriptionMap;
@@ -23,7 +25,7 @@ export class SubscribeHandler {
 			try {
 				this.onMessage(client, message);
 			} catch (err) {
-				return client.send(errorMessage(err));
+				return client.send(errorMessage(err, message['uid']));
 			}
 		});
 		emitter.onAction('websocket.error', ({ client }) => this.unsubscribe(client));
@@ -46,17 +48,17 @@ export class SubscribeHandler {
 			bindAction(module + '.delete');
 		}
 	}
-	subscribe(collection: string, client: WebsocketClient, conf: { query?: Query } = {}) {
+	subscribe(collection: string, client: WebsocketClient, conf: SubscriptionConfig = {}) {
 		if (!this.subscriptions[collection]) this.subscriptions[collection] = new Set();
 		this.subscriptions[collection]?.add({ ...conf, client });
 	}
-	unsubscribe(client: WebsocketClient) {
+	unsubscribe(client: WebsocketClient, uid?: string) {
 		for (const key of Object.keys(this.subscriptions)) {
 			const subscriptions = Array.from(this.subscriptions[key] || []);
 			for (let i = subscriptions.length - 1; i >= 0; i--) {
 				const subscription = subscriptions[i];
 				if (!subscription) continue;
-				if (subscription.client === client) {
+				if (subscription.client === client && (!uid || subscription.uid === uid)) {
 					this.subscriptions[key]?.delete(subscription);
 				}
 			}
@@ -64,7 +66,7 @@ export class SubscribeHandler {
 	}
 	async dispatch(collection: string, data: any) {
 		const subscriptions = this.subscriptions[collection] ?? new Set();
-		for (const { client, query = {} } of subscriptions) {
+		for (const { uid, client, query = {} } of subscriptions) {
 			client.accountability = await refreshAccountability(client.accountability);
 			const service = new ItemsService(collection, {
 				schema: await getSchema({ accountability: client.accountability }),
@@ -75,7 +77,16 @@ export class SubscribeHandler {
 				const keys = data.key ? [data.key] : data.keys;
 				const payload = data.action !== 'delete' ? await service.readMany(keys, query) : data.payload;
 				if (payload.length > 0) {
-					client.send(JSON.stringify({ payload: 'key' in data ? payload[0] : payload }));
+					client.send(
+						fmtMessage(
+							'subscription',
+							{
+								payload: 'key' in data ? payload[0] : payload,
+								event: data.action,
+							},
+							uid
+						)
+					);
 				}
 			} catch (err: any) {
 				logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
@@ -83,20 +94,27 @@ export class SubscribeHandler {
 		}
 	}
 	async onMessage(client: WebsocketClient, message: WebsocketMessage) {
-		if (!['SUBSCRIBE', 'UNSUBSCRIBE'].includes(trimUpper(message.type))) return;
-		const collection = message['collection']!;
-		logger.debug(`[WS REST] SubscribeHandler ${JSON.stringify(message)}`);
-		const service = new ItemsService(collection, {
-			schema: await getSchema(),
-			accountability: client.accountability,
-		});
-		try {
-			// if not authorized the read should throw an error
-			await service.readByQuery({ ...(message['query'] || {}), limit: 1 });
-			// subscribe to events if all went well
-			this.subscribe(collection, client, { query: message['query'] });
-		} catch (err: any) {
-			logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
+		if (trimUpper(message.type) === 'SUBSCRIBE') {
+			const collection = message['collection']!;
+			logger.debug(`[WS REST] SubscribeHandler ${JSON.stringify(message)}`);
+			const service = new ItemsService(collection, {
+				schema: await getSchema(),
+				accountability: client.accountability,
+			});
+			try {
+				// if not authorized the read should throw an error
+				await service.readByQuery({ ...(message['query'] || {}), limit: 1 });
+				// subscribe to events if all went well
+				this.subscribe(collection, client, {
+					query: message['query'],
+					uid: message['uid'],
+				});
+			} catch (err: any) {
+				logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
+			}
+		}
+		if (trimUpper(message.type) === 'UNSUBSCRIBE') {
+			this.unsubscribe(client, message['uid']);
 		}
 	}
 }
