@@ -91,7 +91,7 @@ export async function createServer(): Promise<http.Server> {
 	});
 
 	if (env['WEBSOCKETS_ENABLED']) {
-		// createSubscriptionController(server);
+		createSubscriptionController(server);
 		createWebsocketController(server);
 		startWebsocketHandlers();
 	}
@@ -115,7 +115,7 @@ export async function createServer(): Promise<http.Server> {
 	}
 
 	async function onSignal() {
-		// getSubscriptionController()?.terminate();
+		getSubscriptionController()?.terminate();
 		getWebsocketController()?.terminate();
 
 		const database = getDatabase();

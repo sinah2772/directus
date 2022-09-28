@@ -6,28 +6,22 @@ import { getSchema } from '../../utils/get-schema';
 import { GraphQLService } from '../../services';
 import env from '../../env';
 import SocketController from './base';
-import type { SocketControllerConfig } from '../types';
-
-function getEnvConfig(): SocketControllerConfig {
-	const endpoint: string = env['WEBSOCKETS_GRAPHQL_PATH'];
-	const mode: 'strict' | 'public' | 'handshake' = env['WEBSOCKETS_GRAPHQL_AUTH'];
-	if (mode === 'handshake') {
-		const timeout = env['WEBSOCKETS_GRAPHQL_AUTH_TIMEOUT'] * 1000;
-		return { endpoint, auth: { mode, timeout } };
-	} else {
-		return { endpoint, auth: { mode } };
-	}
-}
 
 export class GraphQLSubscriptionController extends SocketController {
 	constructor(httpServer: httpServer) {
-		super(httpServer, getEnvConfig());
+		super(httpServer, 'WS GraphQL', env['WEBSOCKETS_GRAPHQL_PATH'], {
+			mode: env['WEBSOCKETS_GRAPHQL_AUTH'],
+			timeout: env['WEBSOCKETS_GRAPHQL_AUTH_TIMEOUT'] * 1000,
+		});
 		// hook ws server into graphql logic
 		useGraphQLServer(
 			{
 				context: {},
 				schema: async (ctx) => {
-					const accountability = await getAccountabilityForToken(ctx.connectionParams?.['token'] as string | undefined);
+					const accountability = await getAccountabilityForToken(
+						ctx.connectionParams?.['access_token'] as string | undefined
+					);
+
 					const service = new GraphQLService({
 						schema: await getSchema(),
 						scope: 'items',
