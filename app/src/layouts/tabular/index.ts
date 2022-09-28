@@ -17,6 +17,7 @@ import TabularActions from './actions.vue';
 import TabularOptions from './options.vue';
 import TabularLayout from './tabular.vue';
 import { LayoutOptions, LayoutQuery } from './types';
+import { subscribe, unsubscribe } from '@/websocket';
 
 export default defineLayout<LayoutOptions, LayoutQuery>({
 	id: 'tabular',
@@ -64,6 +65,27 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				search,
 			}
 		);
+
+		let subscriptionId: number | null = null
+
+		watch([sort, limit, page, fields, filter, search], ([newSort, newLimit, newPage, newFields, newFilter, newSearch]) => {
+			if(subscriptionId !== null) unsubscribe(subscriptionId);
+
+			subscriptionId = subscribe({
+				collection: collection.value!,
+				query: {
+					sort: newSort,
+					limit: newLimit,
+					page: newPage,
+					fields: newFields,
+					filter: newFilter,
+					search: newSearch,
+				}
+			}, (data) => {
+				console.log("Data Changed!!!", data)
+				items.value = data.payload
+			})
+		}, {immediate: true})
 
 		const {
 			tableSort,
