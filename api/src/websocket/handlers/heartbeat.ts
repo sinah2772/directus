@@ -3,7 +3,6 @@ import { fmtMessage, trimUpper } from '../utils/message';
 import type { WebsocketClient, WebsocketMessage } from '../types';
 import { WebsocketController, getWebsocketController } from '../controllers';
 import type { ActionHandler } from '@directus/shared/types';
-import logger from '../../logger';
 import env from '../../env';
 
 const HEARTBEAT_FREQUENCY = Number(env['WEBSOCKETS_HEARTBEAT_FREQUENCY']) * 1000;
@@ -23,7 +22,6 @@ export class HeartbeatHandler {
 	}
 	private checkClients() {
 		const hasClients = this.controller.clients.size > 0;
-		logger.debug('checkClients', hasClients, !this.pulse);
 		if (hasClients && !this.pulse) {
 			this.pulse = setInterval(() => {
 				this.pingClients();
