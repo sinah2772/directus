@@ -156,7 +156,6 @@ export default abstract class SocketController {
 		if (this.authTimer) clearTimeout(this.authTimer);
 		if (!client.expiresAt) return;
 		const expiresIn = client.expiresAt * 1000 - Date.now();
-		this.log(`setting timer for in ${expiresIn / 1000}s`);
 		this.authTimer = setTimeout(() => {
 			client.accountability = null;
 			client.expiresAt = null;

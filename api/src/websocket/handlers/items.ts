@@ -1,7 +1,7 @@
 import logger from '../../logger';
 import { getSchema } from '../../utils/get-schema';
 import { ItemsService } from '../../services/items';
-import type { WebsocketClient, WebsocketMessage } from '../types';
+import type { WebSocketClient, WebSocketMessage } from '../types';
 import { errorMessage, fmtMessage, trimUpper } from '../utils/message';
 import emitter from '../../emitter';
 
@@ -11,11 +11,11 @@ export class ItemsHandler {
 			try {
 				this.onMessage(client, message);
 			} catch (err) {
-				client.send(errorMessage(err, message['uid']));
+				client.send(errorMessage(err as string, message['uid']));
 			}
 		});
 	}
-	async onMessage(client: WebsocketClient, message: WebsocketMessage) {
+	async onMessage(client: WebSocketClient, message: WebSocketMessage) {
 		if (trimUpper(message.type) !== 'ITEMS') return;
 		const uid = message['uid'];
 		if (!message['collection']) {

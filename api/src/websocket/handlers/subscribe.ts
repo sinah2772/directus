@@ -21,7 +21,7 @@ export class SubscribeHandler {
 		]);
 	}
 	bindWebsocket() {
-		emitter.onAction('websocket.message.subscribe', ({ client, message }) => {
+		emitter.onAction('websocket.message', ({ client, message }) => {
 			try {
 				this.onMessage(client, message);
 			} catch (err: any) {

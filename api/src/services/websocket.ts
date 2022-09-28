@@ -1,5 +1,5 @@
 import { getWebsocketController, WebsocketController } from '../websocket/controllers';
-import type { WebsocketClient, WebsocketMessage } from '../websocket/types';
+import type { WebSocketClient, WebSocketMessage } from '../websocket/types';
 import { stringify } from '../websocket/utils/message';
 import emitter from '../emitter';
 import type { ActionHandler } from '@directus/shared/types';
@@ -18,14 +18,14 @@ export class WebsocketService {
 		emitter.offAction('websocket.' + event, callback);
 	}
 
-	broadcast(message: string | WebsocketMessage, filter?: { user?: string; role?: string }) {
-		this.controller.clients.forEach((client: WebsocketClient) => {
-			if (filter && filter.user && filter.user !== client.accountability.user) return;
-			if (filter && filter.role && filter.role !== client.accountability.role) return;
+	broadcast(message: string | WebSocketMessage, filter?: { user?: string; role?: string }) {
+		this.controller.clients.forEach((client: WebSocketClient) => {
+			if (filter && filter.user && filter.user !== client.accountability?.user) return;
+			if (filter && filter.role && filter.role !== client.accountability?.role) return;
 			client.send(typeof message === 'string' ? message : stringify(message));
 		});
 	}
-	clients(): Set<WebsocketClient> {
+	clients(): Set<WebSocketClient> {
 		return this.controller.clients;
 	}
 }

@@ -1,6 +1,6 @@
 import emitter from '../../emitter';
 import { fmtMessage, trimUpper } from '../utils/message';
-import type { WebsocketClient, WebsocketMessage } from '../types';
+import type { WebSocketClient, WebSocketMessage } from '../types';
 import { WebsocketController, getWebsocketController } from '../controllers';
 import type { ActionHandler } from '@directus/shared/types';
 import env from '../../env';
@@ -32,14 +32,14 @@ export class HeartbeatHandler {
 			this.pulse = undefined; // do we need this?
 		}
 	}
-	onMessage(client: WebsocketClient, message: WebsocketMessage) {
+	onMessage(client: WebSocketClient, message: WebSocketMessage) {
 		if (trimUpper(message.type) !== 'PING') return;
 		// send pong message back as acknowledgement
 		client.send(fmtMessage('pong', message['uid'] ? { uid: message['uid'] } : {}));
 	}
 	pingClients() {
-		const pendingClients = new Set<WebsocketClient>(this.controller.clients);
-		const activeClients = new Set<WebsocketClient>();
+		const pendingClients = new Set<WebSocketClient>(this.controller.clients);
+		const activeClients = new Set<WebSocketClient>();
 		const timeout = setTimeout(() => {
 			// close connections that havent responded
 			for (const client of pendingClients) {
