@@ -1,3 +1,4 @@
+import type { BaseException } from '@directus/shared/exceptions';
 import type { WebsocketClient } from '../types';
 
 /**
@@ -9,8 +10,14 @@ export const stringify = (msg: any) => (typeof msg === 'string' ? msg : JSON.str
 export const fmtMessage = (type: string, data: Record<string, any> = {}, uid?: string) => {
 	return JSON.stringify({ type, ...data, ...(uid ? { uid } : {}) });
 };
-export const errorMessage = (error: any, uid?: string) => {
-	return JSON.stringify({ error, ...(uid ? { uid } : {}) });
+export const errorMessage = (error: BaseException, uid?: string) => {
+	return JSON.stringify({
+		error: {
+			code: error.code,
+			message: error.message,
+		},
+		...(uid ? { uid } : {}),
+	});
 };
 
 // we may need this later for slow connections

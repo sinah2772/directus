@@ -1,92 +1,180 @@
 import type { Accountability } from '@directus/shared/types';
 import type { IncomingMessage, Server as httpServer } from 'http';
+import type { ParsedUrlQuery } from 'querystring';
 import WebSocket, { WebSocketServer } from 'ws';
+import type internal from 'stream';
 import { parse } from 'url';
-import type { SocketControllerConfig, WebRequest } from '../types';
 import logger from '../../logger';
 import { getAccountabilityForToken } from '../../utils/get-accountability-for-token';
-import type internal from 'stream';
-import { extractToken } from '../utils';
-import emitter from '../../emitter';
-import { waitForMessage } from '../utils/wait-for-message';
-import { trimUpper } from '../utils/message';
-import { getAccountability } from '../utils/get-accountability';
+import { getExpiresAtForToken } from '../utils/get-expires-at-for-token';
+import { authenticateConnection, authenticationError, authenticationSuccess } from '../authenticate';
+import { AuthenticationFailedException } from '../../exceptions/authentication-failed';
+import type { AuthenticationState, AuthMessage, WebSocketClient, WebSocketMessage } from '../types';
 
-export const defaultSocketConfig: SocketControllerConfig = {
-	endpoint: '/websocket',
-	auth: { mode: 'strict' },
+import { errorMessage } from '../utils/message';
+import { waitForAnyMessage, waitForMessageType } from '../utils/wait-for-message';
+import { parseIncomingMessage } from '../utils/parse-incoming-message';
+import { InvalidPayloadException, TokenExpiredException } from '../../exceptions';
+
+type UpgradeContext = {
+	request: IncomingMessage;
+	socket: internal.Duplex;
+	head: Buffer;
 };
 
 export default abstract class SocketController {
-	config: SocketControllerConfig;
+	name: string;
 	server: WebSocket.Server;
-	// hook the websocket handler into the express server
-	constructor(httpServer: httpServer, config?: SocketControllerConfig) {
-		this.server = new WebSocketServer({ noServer: true });
-		this.config = config ?? defaultSocketConfig;
+	clients: Set<WebSocketClient>;
+	authentication: {
+		mode: 'public' | 'handshake' | 'strict';
+		timeout: number;
+	};
+	endpoint: string;
+	private authTimer: NodeJS.Timer | null;
 
+	constructor(
+		httpServer: httpServer,
+		name: string,
+		endpoint: string,
+		authentication: {
+			mode: 'public' | 'handshake' | 'strict';
+			timeout: number;
+		}
+	) {
+		this.server = new WebSocketServer({ noServer: true });
+		this.clients = new Set();
+		this.authTimer = null;
+		this.name = name;
+		this.endpoint = endpoint;
+		this.authentication = authentication;
 		httpServer.on('upgrade', this.handleUpgrade.bind(this));
 	}
 	private async handleUpgrade(request: IncomingMessage, socket: internal.Duplex, head: Buffer) {
 		const { pathname, query } = parse(request.url!, true);
-		if (pathname === this.config.endpoint) {
-			const req = request as WebRequest;
-			if (this.config.auth.mode === 'strict') {
-				let accountability: Accountability | undefined;
-				// check token before upgrading when not set to public access
-				try {
-					accountability = await getAccountabilityForToken(extractToken(request, query));
-				} catch {
-					accountability = undefined;
-				}
-				if (!accountability || !accountability.user) {
-					// do we need to check the role?
-					logger.debug('Websocket upgrade denied - ' + JSON.stringify(accountability || 'invalid'));
-					socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-					socket.destroy();
-					return;
-				}
-				if (accountability) req.accountability = accountability;
-			}
-			this.server.handleUpgrade(request, socket, head, async (ws) => {
-				try {
-					const _req = await emitter.emitFilter('websocket.upgrade', req, { config: this.config });
-					if (this.config.auth.mode === 'handshake') {
-						_req.accountability = await this.handleHandshake(ws, this.config.auth.timeout);
-					}
-					this.server.emit('connection', ws, _req);
-				} catch (error: any) {
-					// logger.error('upgrade stopped ', JSON.stringify(error));
-					ws.send(JSON.stringify({ error: error.message }));
-					ws.close();
-				}
-			});
+		if (pathname !== this.endpoint) return;
+		const context: UpgradeContext = { request, socket, head };
+		if (this.authentication.mode === 'strict') {
+			await this.handleStrictUpgrade(context, query);
+			return;
 		}
+		if (this.authentication.mode === 'handshake') {
+			await this.handleHandshakeUpgrade(context);
+			return;
+		}
+		this.server.handleUpgrade(request, socket, head, async (ws) => {
+			const state = { accountability: null, expiresAt: null } as AuthenticationState;
+			this.server.emit('connection', ws, state);
+		});
 	}
-	private async handleHandshake(client: WebSocket.WebSocket, timeout: number) {
-		const payload = await waitForMessage(client, timeout)
-			.then((data: any) => data as Record<string, any>)
-			.catch(() => {
-				throw new Error('Failed handshake.');
+	private async handleStrictUpgrade({ request, socket, head }: UpgradeContext, query: ParsedUrlQuery) {
+		let accountability: Accountability | null, expiresAt: number | null;
+		try {
+			const token = query['access_token'] as string;
+			accountability = await getAccountabilityForToken(token);
+			expiresAt = getExpiresAtForToken(token);
+		} catch {
+			accountability = null;
+			expiresAt = null;
+		}
+		if (!accountability || !accountability.user) {
+			logger.debug('Websocket upgrade denied - ' + JSON.stringify(accountability || 'invalid'));
+			socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+			socket.destroy();
+			return;
+		}
+		this.server.handleUpgrade(request, socket, head, async (ws) => {
+			const state = { accountability, expiresAt } as AuthenticationState;
+			this.server.emit('connection', ws, state);
+		});
+	}
+	private async handleHandshakeUpgrade({ request, socket, head }: UpgradeContext) {
+		this.server.handleUpgrade(request, socket, head, async (ws) => {
+			try {
+				const payload: WebSocketMessage = await waitForAnyMessage(ws, this.authentication.timeout);
+				if (payload.type !== 'AUTH') {
+					throw new AuthenticationFailedException();
+				}
+				const state = await authenticateConnection(payload as AuthMessage);
+				ws.send(authenticationSuccess());
+				this.server.emit('connection', ws, state);
+			} catch {
+				ws.send(errorMessage(new AuthenticationFailedException()));
+				ws.close();
+			}
+		});
+	}
+	createClient(ws: WebSocket, { accountability, expiresAt }: AuthenticationState) {
+		const client = ws as WebSocketClient;
+		client.accountability = accountability;
+		client.expiresAt = expiresAt;
+
+		ws.on('message', async (data: WebSocket.RawData) => {
+			this.log(`${client.accountability?.user || 'public user'} message`);
+			let message: WebSocketMessage;
+			try {
+				message = parseIncomingMessage(data.toString());
+			} catch (err: any) {
+				client.send(errorMessage(new InvalidPayloadException(err)));
+				return;
+			}
+			this.log(JSON.stringify(message));
+			if (message.type === 'AUTH') {
+				try {
+					const { accountability, expiresAt } = await authenticateConnection(message as AuthMessage);
+					client.accountability = accountability;
+					client.expiresAt = expiresAt;
+					this.setTokenExpireTimer(client);
+					client.send(authenticationSuccess());
+					this.log(`${client.accountability?.user || 'public user'} authenticated`);
+					return;
+				} catch (err) {
+					this.log(`${client.accountability?.user || 'public user'} failed authentication`);
+					client.accountability = null;
+					client.expiresAt = null;
+					client.send(authenticationError());
+				}
+			}
+			ws.emit('parsed-message', message);
+		});
+		ws.on('error', () => {
+			this.log(`${client.accountability?.user || 'public user'} error`);
+			if (this.authTimer) clearTimeout(this.authTimer);
+			this.clients.delete(client);
+		});
+		ws.on('close', () => {
+			this.log(`${client.accountability?.user || 'public user'} closed`);
+			if (this.authTimer) clearTimeout(this.authTimer);
+			this.clients.delete(client);
+		});
+		this.log(`${client.accountability?.user || 'public user'} connected`);
+		this.setTokenExpireTimer(client);
+		this.clients.add(client);
+		return client;
+	}
+	setTokenExpireTimer(client: WebSocketClient) {
+		if (this.authTimer) clearTimeout(this.authTimer);
+		if (!client.expiresAt) return;
+		const expiresIn = client.expiresAt * 1000 - Date.now();
+		this.log(`setting timer for in ${expiresIn / 1000}s`);
+		this.authTimer = setTimeout(() => {
+			client.accountability = null;
+			client.expiresAt = null;
+			client.send(authenticationError(new TokenExpiredException()));
+			waitForMessageType(client, 'AUTH', this.authentication.timeout).catch(() => {
+				client.send(authenticationError());
+				if (this.authentication.mode !== 'public') {
+					client.close();
+				}
 			});
-		if (!payload) throw new Error('Failed handshake.');
-		if (trimUpper(payload['type']) !== 'HANDSHAKE') {
-			throw new Error('Failed handshake.');
-		}
-		if (payload['access_token']) {
-			return await getAccountability(payload['access_token']);
-		}
-		if (payload['email'] && payload['password']) {
-			return await getAccountability({
-				email: payload['email'],
-				password: payload['password'],
-			});
-		}
-		throw new Error('Failed handshake.');
+		}, expiresIn);
 	}
 	terminate() {
 		this.server.clients.forEach((ws) => {
 			ws.terminate();
 		});
+	}
+	log(message: string) {
+		logger.debug(`[${this.name}] ${message}`);
 	}
 }

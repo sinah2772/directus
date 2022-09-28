@@ -2,32 +2,22 @@ import type { Accountability, Query } from '@directus/shared/types';
 import type { WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
 
-export type SocketControllerConfig = {
-	endpoint: string; // endpoint for request upgrade
-	auth: {
-		mode: 'public' | 'handshake' | 'strict';
-		timeout: number;
-	};
+export type AuthenticationState = {
+	accountability: Accountability | null;
+	expiresAt: number | null;
 };
 
-export type WebsocketClient = WebSocket & {
-	accountability: TemporaryAccountability | null;
-};
+export type WebSocketClient = WebSocket & AuthenticationState;
+export type UpgradeRequest = IncomingMessage & AuthenticationState;
 
 export type Subscription = {
 	uid?: string;
 	query?: Query;
-	client: WebsocketClient;
+	client: WebSocketClient;
 };
 export type SubscriptionMap = Record<string, Set<Subscription>>;
 
-export type TemporaryAccountability = Accountability & { expiresAt?: number | null };
-
-export type WebRequest = IncomingMessage & {
-	accountability: TemporaryAccountability | null;
-};
-
-export type WebsocketMessage = { type: string } & Record<string, any>;
+export type WebSocketMessage = { type: string } & Record<string, any>;
 
 export type ResponseMessage =
 	| {

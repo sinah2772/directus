@@ -1,11 +1,11 @@
 import { getSchema } from '../../utils/get-schema';
 import { ItemsService } from '../../services/items';
-import type { SubscriptionMap, WebsocketClient, WebsocketMessage } from '../types';
+import type { SubscriptionMap, WebSocketClient, WebSocketMessage } from '../types';
 import type { Query } from '@directus/shared/types';
 import emitter from '../../emitter';
 import logger from '../../logger';
-import { refreshAccountability } from '../utils/refresh-accountability';
-import { errorMessage, fmtMessage, trimUpper } from '../utils/message';
+import { errorMessage, fmtMessage } from '../utils/message';
+import { refreshAccountability } from '../authenticate';
 
 type SubscriptionConfig = { query?: Query; uid?: string };
 
@@ -21,10 +21,10 @@ export class SubscribeHandler {
 		]);
 	}
 	bindWebsocket() {
-		emitter.onAction('websocket.message', ({ client, message }) => {
+		emitter.onAction('websocket.message.subscribe', ({ client, message }) => {
 			try {
 				this.onMessage(client, message);
-			} catch (err) {
+			} catch (err: any) {
 				return client.send(errorMessage(err, message['uid']));
 			}
 		});
@@ -48,11 +48,11 @@ export class SubscribeHandler {
 			bindAction(module + '.delete');
 		}
 	}
-	subscribe(collection: string, client: WebsocketClient, conf: SubscriptionConfig = {}) {
+	subscribe(collection: string, client: WebSocketClient, conf: SubscriptionConfig = {}) {
 		if (!this.subscriptions[collection]) this.subscriptions[collection] = new Set();
 		this.subscriptions[collection]?.add({ ...conf, client });
 	}
-	unsubscribe(client: WebsocketClient, uid?: string) {
+	unsubscribe(client: WebSocketClient, uid?: string) {
 		for (const key of Object.keys(this.subscriptions)) {
 			const subscriptions = Array.from(this.subscriptions[key] || []);
 			for (let i = subscriptions.length - 1; i >= 0; i--) {
@@ -93,8 +93,8 @@ export class SubscribeHandler {
 			}
 		}
 	}
-	async onMessage(client: WebsocketClient, message: WebsocketMessage) {
-		if (trimUpper(message.type) === 'SUBSCRIBE') {
+	async onMessage(client: WebSocketClient, message: WebSocketMessage) {
+		if (message.type === 'SUBSCRIBE') {
 			const collection = message['collection']!;
 			logger.debug(`[WS REST] SubscribeHandler ${JSON.stringify(message)}`);
 			const service = new ItemsService(collection, {
@@ -113,7 +113,7 @@ export class SubscribeHandler {
 				logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
 			}
 		}
-		if (trimUpper(message.type) === 'UNSUBSCRIBE') {
+		if (message.type === 'UNSUBSCRIBE') {
 			this.unsubscribe(client, message['uid']);
 		}
 	}
