@@ -1,21 +1,5 @@
-import { Query } from '@directus/shared/types';
+import { MessageCallback, MessageType, SubscribeOptions, WebSocketClient, WebSocketWrapper } from '@directus/shared/types';
 import api from './api';
-
-const messageTypes = ['SUBSCRIBE', 'UNSUBSCRIBE', 'PING', 'PONG', 'AUTH'] as const;
-type MessageType = typeof messageTypes[number]
-
-type MessageCallback = (data: Record<string, any>) => void;
-
-type WSQuery = Query & {
-    status?: boolean,
-    event?: string | string[],
-}
-
-interface SubscribeOptions {
-    collection: string,
-    item?: string | number,
-    query?: WSQuery,
-}
 
 let uidCounter = (function*() {
     let i = 0;
@@ -39,8 +23,7 @@ function connectWebSocket() {
 
     ws.onopen = async () => {
         if(ws === null) return;
-        const client = new WebSocketClient(ws)
-        await authenticate(client)
+        await authenticate(ws)
     }
 
     ws.onmessage = (event) => {
@@ -79,8 +62,11 @@ function connectWebSocket() {
     
 }
 
-async function authenticate(client: WebSocketClient) {
-    let token = api.defaults.headers.common['Authorization'].substring(7)
+async function authenticate(ws: WebSocket) {
+    let token = api.defaults.headers.common['Authorization']?.substring(7)
+    const client = new Client(ws)
+
+    if(!token) return
 
     console.log("Authenticating with token", token)
 
@@ -96,7 +82,7 @@ async function authenticate(client: WebSocketClient) {
             onAuthCallbacks.forEach((callback) => callback())
         }
 
-        if(response['status'] === 'error' && false) {
+        if(response['status'] === 'error') {
             console.error("Authentication failed", response['error'])
             authenticated = false;
         }
@@ -109,19 +95,21 @@ async function authenticate(client: WebSocketClient) {
 connectWebSocket()
 
 export function getWebSocket() {
-    return new WebSocketClient(ws!)
+    return new Wrapper(ws!)
 }
 
-class WebSocketClient {
-    ws: WebSocket
+class Wrapper implements WebSocketWrapper {
     connectCallbacks = new Set<(client: WebSocketClient) => void>()
     disconnectCallbacks = new Set<() => void>()
+    ws: WebSocket
+    client: WebSocketClient
 
     constructor(ws: WebSocket) {
         this.ws = ws
+        this.client = new Client(ws)
 
         onAuthCallbacks.add(() => {
-            this.connectCallbacks.forEach((callback) => callback(this))
+            this.connectCallbacks.forEach((callback) => callback(this.client))
         })
         oncloseCallbacks.add(() => {
             this.disconnectCallbacks.forEach((callback) => callback())
@@ -132,12 +120,21 @@ class WebSocketClient {
         this.connectCallbacks.add(callback)
 
         if(authenticated) {
-            callback(this)
+            callback(this.client)
         }
     }
 
     onDisconnect(callback: () => void) {
         this.disconnectCallbacks.add(callback)
+    }
+    
+}
+
+class Client implements WebSocketClient {
+    ws: WebSocket
+    
+    constructor(ws: WebSocket) {
+        this.ws = ws
     }
 
     subscribe(options: SubscribeOptions, callback: MessageCallback) {
@@ -172,10 +169,8 @@ class WebSocketClient {
                 resolve(data)
             })
     
-            resolve({ status: 'ok' })
-    
             setTimeout(() => {
-                // reject(new Error(`Timeout while waiting for ${type} response`))
+                reject(new Error(`Timeout while waiting for ${type} response`))
             }, timeout)
     
             this.ws.send(JSON.stringify({ ...data, type, uid: counter }));

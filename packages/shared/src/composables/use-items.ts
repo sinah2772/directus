@@ -4,7 +4,8 @@ import { useCollection } from './use-collection.js';
 import type { Item, Query } from '../types/index.js';
 import { moveInArray } from '../utils/index.js';
 import { isEqual, throttle } from 'lodash-es';
-import { computed, ComputedRef, ref, Ref, watch, WritableComputedRef, unref } from 'vue';
+import { computed, ComputedRef, ref, Ref, watch, WritableComputedRef, unref, onUnmounted } from 'vue';
+import { getWebSocket } from './use-system.js';
 
 type ManualSortData = {
 	item: string | number;
@@ -96,6 +97,36 @@ export function useItems(collection: Ref<string | null>, query: ComputedQuery, f
 		},
 		{ deep: true, immediate: true }
 	);
+
+	const ws = getWebSocket()
+
+	let subscriptionId: number | null = null
+
+	ws.onConnect((client) => {
+		console.log("On connect callback!")
+		watch([collection, sort, limit, page, fields, filter, search], ([collection, newSort, newLimit, newPage, newFields, newFilter, newSearch]) => {
+			if(subscriptionId !== null) client.unsubscribe(subscriptionId);
+
+			subscriptionId = client.subscribe({
+				collection: collection!,
+				query: {
+					sort: newSort ?? null,
+					limit: newLimit ?? null,
+					page: newPage ?? null,
+					fields: newFields ?? null,
+					filter: newFilter ?? null,
+					search: newSearch ?? null,
+				}
+			}, (data) => {
+				console.log("Data Changed!!!", data)
+				items.value = data['payload']
+			})
+		}, {immediate: true})
+
+		onUnmounted(() => {
+			if(subscriptionId !== null) client.unsubscribe(subscriptionId);
+		})
+	})
 
 	return { itemCount, totalCount, items, totalPages, loading, error, changeManualSort, getItems };
 
