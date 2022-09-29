@@ -1,7 +1,6 @@
 import { getSchema } from '../../utils/get-schema';
 import { ItemsService } from '../../services/items';
 import type { SubscribeMessage, Subscription, WebSocketClient } from '../types';
-import type { Item } from '@directus/shared/types';
 import emitter from '../../emitter';
 import logger from '../../logger';
 import { errorMessage, fmtMessage } from '../utils/message';
@@ -112,8 +111,10 @@ export class SubscribeHandler {
 				// 		{ payload: 'key' in data ? payload[0] : payload, event: data.action },
 				// 		uid));
 				// }
-				const payload = this.mergeStatusData(await service.readByQuery(query), subscription);
-				client.send(fmtMessage('subscription', { payload, event: data.action }, uid));
+				const payload = await service.readByQuery(query);
+				const msg: Record<string, any> = { payload, event: data.action };
+				if (subscription.status && data.status) msg['status'] = data.status;
+				client.send(fmtMessage('subscription', msg, uid));
 			} catch (err: any) {
 				logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
 			}
@@ -130,20 +131,15 @@ export class SubscribeHandler {
 			try {
 				const subscription: Subscription = { ...omit(message, 'type'), client };
 				// if not authorized the read should throw an error
-				const initialPayload = this.mergeStatusData(await service.readByQuery(message['query'] ?? {}), subscription);
+				const initialPayload = await service.readByQuery(message['query'] ?? {});
 				// subscribe to events if all went well
 				this.subscribe(subscription);
 				// send initial data
-				client.send(
-					fmtMessage(
-						'subscription',
-						{
-							payload: initialPayload,
-							event: 'init',
-						},
-						message['uid']
-					)
-				);
+				const msg: Record<string, any> = { payload: initialPayload, event: 'init' };
+				if (collection === 'directus_users' && subscription.status) {
+					msg['status'] = { online: Array.from(this.onlineStatus) };
+				}
+				client.send(fmtMessage('subscription', msg, message['uid']));
 			} catch (err: any) {
 				logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
 			}
@@ -156,30 +152,18 @@ export class SubscribeHandler {
 		const userId = client.accountability?.user;
 		if (!userId) return;
 		this.onlineStatus.add(userId);
+		this.dispatch('directus_users', {
+			action: 'status',
+			status: { online: Array.from(this.onlineStatus) },
+		});
 	}
 	private userOffline(client: WebSocketClient) {
 		const userId = client.accountability?.user;
 		if (!userId) return;
 		this.onlineStatus.delete(userId);
-	}
-	private mergeStatusData(items: Item[], subscription: Subscription) {
-		if (!subscription.status) return items;
-		if (subscription.collection === 'directus_users') {
-			// merge in online status
-			return items.map((item) => {
-				if (item['id']) item['online'] = this.onlineStatus.has(item['id']);
-				return item;
-			});
-		} else {
-			return items;
-			// do something for open subscriptions
-			// const watchedItems = this.watchedItems(subscription.collection);
-			// return items.map((item) => {
-			// 	if (item['id'] && watchedItems[item['id']]) {
-			// 		item['']
-			// 	}
-			// 	return item;
-			// })
-		}
+		this.dispatch('directus_users', {
+			action: 'status',
+			status: { online: Array.from(this.onlineStatus) },
+		});
 	}
 }
