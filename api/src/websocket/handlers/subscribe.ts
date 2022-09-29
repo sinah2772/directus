@@ -113,7 +113,7 @@ export class SubscribeHandler {
 				// }
 				const payload = await service.readByQuery(query);
 				const msg: Record<string, any> = { payload, event: data.action };
-				if (subscription.status && data.status) msg['status'] = data.status;
+				if (subscription.status) msg['status'] = { online: Array.from(this.onlineStatus) };
 				client.send(fmtMessage('subscription', msg, uid));
 			} catch (err: any) {
 				logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
@@ -152,18 +152,12 @@ export class SubscribeHandler {
 		const userId = client.accountability?.user;
 		if (!userId) return;
 		this.onlineStatus.add(userId);
-		this.dispatch('directus_users', {
-			action: 'status',
-			status: { online: Array.from(this.onlineStatus) },
-		});
+		this.dispatch('directus_users', { action: 'status' });
 	}
 	private userOffline(client: WebSocketClient) {
 		const userId = client.accountability?.user;
 		if (!userId) return;
 		this.onlineStatus.delete(userId);
-		this.dispatch('directus_users', {
-			action: 'status',
-			status: { online: Array.from(this.onlineStatus) },
-		});
+		this.dispatch('directus_users', { action: 'status' });
 	}
 }
