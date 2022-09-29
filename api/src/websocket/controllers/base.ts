@@ -15,6 +15,7 @@ import { errorMessage } from '../utils/message';
 import { waitForAnyMessage, waitForMessageType } from '../utils/wait-for-message';
 import { parseIncomingMessage } from '../utils/parse-incoming-message';
 import { InvalidPayloadException, TokenExpiredException } from '../../exceptions';
+import emitter from '../../emitter';
 
 type UpgradeContext = {
 	request: IncomingMessage;
@@ -125,11 +126,13 @@ export default abstract class SocketController {
 					client.accountability = accountability;
 					client.expiresAt = expiresAt;
 					this.setTokenExpireTimer(client);
+					emitter.emitAction('websocket.auth.success', { client });
 					client.send(authenticationSuccess(message['uid']));
 					this.log(`${client.accountability?.user || 'public user'} authenticated`);
 					return;
 				} catch (err) {
 					this.log(`${client.accountability?.user || 'public user'} failed authentication`);
+					emitter.emitAction('websocket.auth.failure', { client });
 					client.accountability = null;
 					client.expiresAt = null;
 					client.send(authenticationError(message['uid']));

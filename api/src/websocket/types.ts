@@ -13,9 +13,12 @@ export type UpgradeRequest = IncomingMessage & AuthenticationState;
 export type Subscription = {
 	uid?: string;
 	query?: Query;
+	item?: string | number;
+	// events?: string | string[];
+	status?: boolean;
+	collection: string;
 	client: WebSocketClient;
 };
-export type SubscriptionMap = Record<string, Set<Subscription>>;
 
 export type WebSocketMessage = { type: string } & Record<string, any>;
 
@@ -33,15 +36,17 @@ export type ResponseMessage =
 			};
 	  };
 
-export type SubscribeMessage = {
-	type: 'SUBSCRIBE';
-	collection: string;
-	item?: string | number;
-	query?: Query & {
-		status: boolean;
-		event: string | string[];
-	};
-};
+export type SubscribeMessage =
+	| {
+			type: 'SUBSCRIBE';
+			collection: string;
+			item?: string | number;
+			status?: boolean;
+			// events?: string | string[];
+			query?: Query;
+			uid?: string;
+	  }
+	| { type: 'UNSUBSCRIBE'; uid?: string };
 
 export type AuthMessage =
 	| { type: 'AUTH'; email: string; password: string }
