@@ -51,7 +51,7 @@ export async function refreshAccountability(
 	return result;
 }
 
-export function authenticationError(error?: BaseException): string {
+export function authenticationError(error?: BaseException, uid?: string): string {
 	error = error ?? new AuthenticationFailedException();
 	return JSON.stringify({
 		type: 'auth',
@@ -60,12 +60,14 @@ export function authenticationError(error?: BaseException): string {
 			code: error.code,
 			message: error.message,
 		},
+		...(uid ? { uid } : {}),
 	} as ResponseMessage);
 }
 
-export function authenticationSuccess(): string {
+export function authenticationSuccess(uid?: string): string {
 	return JSON.stringify({
 		type: 'auth',
 		status: 'ok',
+		...(uid ? { uid } : {}),
 	} as ResponseMessage);
 }

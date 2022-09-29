@@ -96,7 +96,7 @@ export default abstract class SocketController {
 					throw new AuthenticationFailedException();
 				}
 				const state = await authenticateConnection(payload as AuthMessage);
-				ws.send(authenticationSuccess());
+				ws.send(authenticationSuccess(payload['uid']));
 				this.server.emit('connection', ws, state);
 			} catch {
 				ws.send(errorMessage(new AuthenticationFailedException()));
@@ -125,14 +125,14 @@ export default abstract class SocketController {
 					client.accountability = accountability;
 					client.expiresAt = expiresAt;
 					this.setTokenExpireTimer(client);
-					client.send(authenticationSuccess());
+					client.send(authenticationSuccess(message['uid']));
 					this.log(`${client.accountability?.user || 'public user'} authenticated`);
 					return;
 				} catch (err) {
 					this.log(`${client.accountability?.user || 'public user'} failed authentication`);
 					client.accountability = null;
 					client.expiresAt = null;
-					client.send(authenticationError());
+					client.send(authenticationError(message['uid']));
 				}
 			}
 			ws.emit('parsed-message', message);
@@ -160,8 +160,8 @@ export default abstract class SocketController {
 			client.accountability = null;
 			client.expiresAt = null;
 			client.send(authenticationError(new TokenExpiredException()));
-			waitForMessageType(client, 'AUTH', this.authentication.timeout).catch(() => {
-				client.send(authenticationError());
+			waitForMessageType(client, 'AUTH', this.authentication.timeout).catch((msg: WebSocketMessage) => {
+				client.send(authenticationError(undefined, msg['uid']));
 				if (this.authentication.mode !== 'public') {
 					client.close();
 				}

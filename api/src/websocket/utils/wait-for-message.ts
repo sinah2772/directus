@@ -33,15 +33,20 @@ export const waitForMessageType = (client: WebSocket, type: string, timeout: num
 		}, timeout);
 
 		function awaitMessage(event: MessageEvent) {
+			let msg: WebSocketMessage;
 			try {
-				const msg = parseIncomingMessage(event.data as string);
+				msg = parseIncomingMessage(event.data as string);
+			} catch {
+				return;
+			}
+			try {
 				if (msg.type === type) {
 					clearTimeout(timer);
 					client.removeEventListener('message', awaitMessage);
 					resolve(msg);
 				}
 			} catch (err) {
-				reject(err);
+				reject(msg);
 			}
 		}
 	});
