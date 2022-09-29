@@ -1,6 +1,6 @@
 import { provide } from 'vue';
 import api from '@/api';
-import { API_INJECT, EXTENSIONS_INJECT, STORES_INJECT } from '@directus/shared/constants';
+import { API_INJECT, EXTENSIONS_INJECT, STORES_INJECT, WEBSOCKET_INJECT } from '@directus/shared/constants';
 import { getInterfaces } from '@/interfaces';
 import { getDisplays } from '@/displays';
 import { getLayouts } from '@/layouts';
@@ -21,6 +21,7 @@ import { useServerStore } from '@/stores/server';
 import { useSettingsStore } from '@/stores/settings';
 import { useUserStore } from '@/stores/user';
 import { useFlowsStore } from '@/stores/flows';
+import { getWebSocket } from '@/websocket';
 
 export function useSystem(): void {
 	provide(STORES_INJECT, {
@@ -39,6 +40,8 @@ export function useSystem(): void {
 		useUserStore,
 		useFlowsStore,
 	});
+
+	provide(WEBSOCKET_INJECT, getWebSocket)
 
 	provide(API_INJECT, api);
 

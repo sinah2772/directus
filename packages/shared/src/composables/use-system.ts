@@ -1,7 +1,7 @@
 import { inject } from 'vue';
 import type { AxiosInstance } from 'axios';
-import { API_INJECT, EXTENSIONS_INJECT, STORES_INJECT } from '../constants/index.js';
-import type { AppExtensionConfigs } from '../types/index.js';
+import { API_INJECT, EXTENSIONS_INJECT, STORES_INJECT, WEBSOCKET_INJECT } from '../constants/index.js';
+import type { AppExtensionConfigs, WebSocketWrapper } from '../types/index.js';
 
 export function useStores(): Record<string, any> {
 	const stores = inject<Record<string, any>>(STORES_INJECT);
@@ -9,6 +9,14 @@ export function useStores(): Record<string, any> {
 	if (!stores) throw new Error('[useStores]: The stores could not be found.');
 
 	return stores;
+}
+
+export function getWebSocket(): WebSocketWrapper {
+	const websocket = inject<() => WebSocketWrapper>(WEBSOCKET_INJECT);
+
+	if (!websocket || typeof websocket !== 'function') throw new Error('[getWebSocket]: The websocket could not be found.');
+
+	return websocket();
 }
 
 export function useApi(): AxiosInstance {
