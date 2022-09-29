@@ -1,7 +1,7 @@
 import { Query } from '@directus/shared/types';
 import api from './api';
 
-const messageTypes = ['SUBSCRIBE', 'UNSUBSCRIBE', 'PING', 'PONG', 'AUTH','HANDSHAKE'] as const;
+const messageTypes = ['SUBSCRIBE', 'UNSUBSCRIBE', 'PING', 'PONG', 'AUTH'] as const;
 type MessageType = typeof messageTypes[number]
 
 type MessageCallback = (data: Record<string, any>) => void;
@@ -87,7 +87,7 @@ async function authenticate(client: WebSocketClient) {
     try {
         authenticated = true;
 
-        const response = await client.send('HANDSHAKE', {
+        const response = await client.send('AUTH', {
             access_token: token
         })
         console.log("Authenticated", response)
