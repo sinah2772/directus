@@ -7,6 +7,7 @@ import { errorMessage, fmtMessage } from '../utils/message';
 import { refreshAccountability } from '../authenticate';
 import { omit } from 'lodash-es';
 import { MetaService } from '../../services';
+import { sanitizeQuery } from '../../utils/sanitize-query';
 
 export class SubscribeHandler {
 	subscriptions: Record<string, Set<Subscription>>;
@@ -98,12 +99,12 @@ export class SubscribeHandler {
 		const subscriptions = this.subscriptions[collection] ?? new Set();
 		for (const subscription of subscriptions) {
 			const { uid, client, query = {} } = subscription;
-			const accountability = await refreshAccountability(client.accountability);
-			client.accountability = accountability;
-			const schema = await getSchema({ accountability });
-			const service = new ItemsService(collection, { schema, accountability });
-			const metaService = new MetaService({ schema, accountability });
 			try {
+				const accountability = await refreshAccountability(client.accountability);
+				client.accountability = accountability;
+				const schema = await getSchema({ accountability });
+				const service = new ItemsService(collection, { schema, accountability });
+				const metaService = new MetaService({ schema, accountability });
 				// get the payload based on the provided query
 				// const keys = data.key ? [data.key] : data.keys;
 				// const payload = data.action === 'delete' ? data.payload : await service.readMany(keys, query);
@@ -133,12 +134,13 @@ export class SubscribeHandler {
 				const service = new ItemsService(collection, { schema, accountability });
 				const metaService = new MetaService({ schema, accountability });
 				const subscription: Subscription = { ...omit(message, 'type'), client };
+				const query = sanitizeQuery(message['query'] ?? {}, accountability);
 				// if not authorized the read should throw an error
-				const initialPayload = await service.readByQuery(message['query'] ?? {});
+				const initialPayload = await service.readByQuery(query);
 				// subscribe to events if all went well
 				this.subscribe(subscription);
 				// send initial data
-				const meta = await metaService.getMetaForQuery(collection, message['query'] ?? {});
+				const meta = await metaService.getMetaForQuery(collection, query);
 				const msg: Record<string, any> = { payload: initialPayload, event: 'init' };
 				if (collection === 'directus_users' && subscription.status) {
 					msg['status'] = { online: Array.from(this.onlineStatus) };
