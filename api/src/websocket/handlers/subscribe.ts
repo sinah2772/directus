@@ -6,6 +6,7 @@ import logger from '../../logger';
 import { errorMessage, fmtMessage } from '../utils/message';
 import { refreshAccountability } from '../authenticate';
 import { omit } from 'lodash-es';
+import { MetaService } from '../../services';
 
 export class SubscribeHandler {
 	subscriptions: Record<string, Set<Subscription>>;
@@ -97,11 +98,11 @@ export class SubscribeHandler {
 		const subscriptions = this.subscriptions[collection] ?? new Set();
 		for (const subscription of subscriptions) {
 			const { uid, client, query = {} } = subscription;
-			client.accountability = await refreshAccountability(client.accountability);
-			const service = new ItemsService(collection, {
-				schema: await getSchema({ accountability: client.accountability }),
-				accountability: client.accountability,
-			});
+			const accountability = await refreshAccountability(client.accountability);
+			client.accountability = accountability;
+			const schema = await getSchema({ accountability });
+			const service = new ItemsService(collection, { schema, accountability });
+			const metaService = new MetaService({ schema, accountability });
 			try {
 				// get the payload based on the provided query
 				// const keys = data.key ? [data.key] : data.keys;
@@ -112,8 +113,10 @@ export class SubscribeHandler {
 				// 		uid));
 				// }
 				const payload = await service.readByQuery(query);
+				const meta = await metaService.getMetaForQuery(collection, query);
 				const msg: Record<string, any> = { payload, event: data.action };
 				if (subscription.status) msg['status'] = { online: Array.from(this.onlineStatus) };
+				if ('meta' in (subscription.query ?? {})) msg['meta'] = meta;
 				client.send(fmtMessage('subscription', msg, uid));
 			} catch (err: any) {
 				logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
@@ -124,21 +127,23 @@ export class SubscribeHandler {
 		if (message.type === 'SUBSCRIBE') {
 			const collection = message['collection']!;
 			logger.debug(`[WS REST] SubscribeHandler ${JSON.stringify(message)}`);
-			const service = new ItemsService(collection, {
-				schema: await getSchema(),
-				accountability: client.accountability,
-			});
 			try {
+				const accountability = client.accountability;
+				const schema = await getSchema(accountability ? { accountability } : {});
+				const service = new ItemsService(collection, { schema, accountability });
+				const metaService = new MetaService({ schema, accountability });
 				const subscription: Subscription = { ...omit(message, 'type'), client };
 				// if not authorized the read should throw an error
 				const initialPayload = await service.readByQuery(message['query'] ?? {});
 				// subscribe to events if all went well
 				this.subscribe(subscription);
 				// send initial data
+				const meta = await metaService.getMetaForQuery(collection, message['query'] ?? {});
 				const msg: Record<string, any> = { payload: initialPayload, event: 'init' };
 				if (collection === 'directus_users' && subscription.status) {
 					msg['status'] = { online: Array.from(this.onlineStatus) };
 				}
+				if ('meta' in (subscription.query ?? {})) msg['meta'] = meta;
 				client.send(fmtMessage('subscription', msg, message['uid']));
 			} catch (err: any) {
 				logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
