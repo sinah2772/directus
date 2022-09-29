@@ -4,6 +4,8 @@ import { ItemsService } from '../../services/items';
 import type { WebSocketClient, WebSocketMessage } from '../types';
 import { errorMessage, fmtMessage, trimUpper } from '../utils/message';
 import emitter from '../../emitter';
+import { MetaService } from '../../services';
+import { sanitizeQuery } from '../../utils/sanitize-query';
 
 export class ItemsHandler {
 	constructor() {
@@ -21,36 +23,39 @@ export class ItemsHandler {
 		if (!message['collection']) {
 			return client.send(errorMessage('invalid collection', uid));
 		}
-		const service = new ItemsService(message['collection'], {
-			accountability: client.accountability,
-			schema: await getSchema(),
-		});
+		const accountability = client.accountability;
+		const schema = await getSchema(accountability ? { accountability } : {});
+		const service = new ItemsService(message['collection'], { schema, accountability });
+		const metaService = new MetaService({ schema, accountability });
 		if (!['create', 'read', 'update', 'delete'].includes(message['action'])) {
 			return client.send(errorMessage('invalid action', uid));
 		}
-		let result;
+		const query = sanitizeQuery(message['query'], accountability);
+		let result, meta;
 		switch (message['action']) {
 			case 'create':
 				if (Array.isArray(message['data'])) {
 					const keys = await service.createMany(message['data']);
-					result = await service.readMany(keys, message['query'] || {});
+					result = await service.readMany(keys, query);
 				} else if (!message['data']) {
 					return client.send(errorMessage('invalid data payload', uid));
 				} else {
 					const key = await service.createOne(message['data']);
-					result = await service.readOne(key, message['query'] || {});
+					result = await service.readOne(key, query);
 				}
 				break;
 			case 'read':
-				if (!message['query']) {
+				if (!query) {
 					return client.send(errorMessage('invalid query', uid));
 				}
-				result = await service.readByQuery(message['query']);
+				result = await service.readByQuery(query);
+				meta = await metaService.getMetaForQuery(message['collection'], query);
 				break;
 			case 'update':
 				if (Array.isArray(message['data'])) {
 					const keys = await service.updateMany(message['ids'], message['data']);
-					result = await service.readMany(keys, message['query']);
+					meta = await metaService.getMetaForQuery(message['collection'], query);
+					result = await service.readMany(keys, query);
 				} else if (!message['data']) {
 					return client.send(errorMessage('invalid data payload', uid));
 				} else {
@@ -71,6 +76,6 @@ export class ItemsHandler {
 				break;
 		}
 		logger.debug(`[WS REST] ItemsHandler ${JSON.stringify(message)}`);
-		client.send(fmtMessage('items', { data: result }, uid));
+		client.send(fmtMessage('items', { data: result, ...(meta ? { meta } : {}) }, uid));
 	}
 }
