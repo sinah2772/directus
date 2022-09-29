@@ -31,7 +31,7 @@ function connectWebSocket() {
         
         const message = JSON.parse(event.data);
         const type = message['type'].toUpperCase()
-        const uid = 'uid' in message? Number(message['uid']) : undefined;
+        let uid = 'uid' in message? Number(message['uid']) : undefined;
     
         console.log("messageRecieved", message)
     
@@ -39,8 +39,12 @@ function connectWebSocket() {
             case 'PING':
                 ws.send(JSON.stringify({type: 'PONG'}))
                 break;
+            case 'AUTH':
+                uid = 0
+                console.log("Authentication response", message)
+                break;
         }
-        if(uid) {
+        if(uid !== undefined) {
             const callback = onMessageCallbacks.get(uid)
             if(callback) callback(message)
         }
@@ -51,7 +55,7 @@ function connectWebSocket() {
         oncloseCallbacks.forEach((callback) => callback())
         setTimeout(() => {
             connectWebSocket()
-        }, 1_000)
+        }, 10_000)
     }
 
     ws.onerror = (error) => {
@@ -84,6 +88,7 @@ async function authenticate(ws: WebSocket) {
 
         if(response['status'] === 'error') {
             console.error("Authentication failed", response['error'])
+            //TODO: Handle token expiration
             authenticated = false;
         }
     } catch(error) {
@@ -170,7 +175,7 @@ class Client implements WebSocketClient {
             })
     
             setTimeout(() => {
-                reject(new Error(`Timeout while waiting for ${type} response`))
+                if(onMessageCallbacks.has(counter)) reject(new Error(`Timeout while waiting for ${type} response`))
             }, timeout)
     
             this.ws.send(JSON.stringify({ ...data, type, uid: counter }));

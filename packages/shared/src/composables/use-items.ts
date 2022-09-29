@@ -36,7 +36,7 @@ type ComputedQuery = {
 export function useItems(collection: Ref<string | null>, query: ComputedQuery, fetchOnInit = true): UsableItems {
 	const api = useApi();
 	const { primaryKeyField } = useCollection(collection);
-
+	
 	const { fields, alias, limit, sort, search, filter, page } = query;
 
 	const endpoint = computed(() => {
@@ -61,6 +61,35 @@ export function useItems(collection: Ref<string | null>, query: ComputedQuery, f
 
 	let currentRequest: CancelTokenSource | null = null;
 	let loadingTimeout: NodeJS.Timeout | null = null;
+	let webSocketsActive = false
+
+	const finalQuery = computed(() => {
+		let fieldsToFetch = [...(unref(fields) ?? [])];
+
+		// Make sure the primary key is always fetched
+		if (
+			!unref(fields)?.includes('*') &&
+			primaryKeyField.value &&
+			fieldsToFetch.includes(primaryKeyField.value.field) === false
+		) {
+			fieldsToFetch.push(primaryKeyField.value.field);
+		}
+
+		// Filter out fake internal columns. This is (among other things) for a fake $thumbnail m2o field
+		// on directus_files
+		fieldsToFetch = fieldsToFetch.filter((field) => field.startsWith('$') === false);
+
+		return {
+			limit: unref(limit) ?? null,
+			fields: fieldsToFetch ?? null,
+			...(alias ? { alias: unref(alias) ?? null } : {}),
+			sort: unref(sort) ?? null,
+			page: unref(page) ?? null,
+			search: unref(search) ?? null,
+			filter: unref(filter) ?? null,
+			meta: ['filter_count', 'total_count'],
+		}
+	})
 
 	const fetchItems = throttle(getItems, 500);
 
@@ -103,35 +132,33 @@ export function useItems(collection: Ref<string | null>, query: ComputedQuery, f
 	let subscriptionId: number | null = null
 
 	ws.onConnect((client) => {
-		console.log("On connect callback!")
-		watch([collection, sort, limit, page, fields, filter, search], ([collection, newSort, newLimit, newPage, newFields, newFilter, newSearch]) => {
+		watch([collection, finalQuery], ([newCollection, newQuery]) => {
 			if(subscriptionId !== null) client.unsubscribe(subscriptionId);
 
 			subscriptionId = client.subscribe({
-				collection: collection!,
-				query: {
-					sort: newSort ?? null,
-					limit: newLimit ?? null,
-					page: newPage ?? null,
-					fields: newFields ?? null,
-					filter: newFilter ?? null,
-					search: newSearch ?? null,
-				}
+				collection: newCollection!,
+				query: newQuery
 			}, (data) => {
 				console.log("Data Changed!!!", data)
 				items.value = data['payload']
 			})
 		}, {immediate: true})
 
+		webSocketsActive = true
+
 		onUnmounted(() => {
 			if(subscriptionId !== null) client.unsubscribe(subscriptionId);
 		})
 	})
 
+	ws.onDisconnect(() => {
+		webSocketsActive = false
+	})
+
 	return { itemCount, totalCount, items, totalPages, loading, error, changeManualSort, getItems };
 
 	async function getItems() {
-		if (!endpoint.value) return;
+		if (!endpoint.value || webSocketsActive) return;
 
 		currentRequest?.cancel();
 		currentRequest = null;
@@ -146,64 +173,15 @@ export function useItems(collection: Ref<string | null>, query: ComputedQuery, f
 			loading.value = true;
 		}, 150);
 
-		let fieldsToFetch = [...(unref(fields) ?? [])];
-
-		// Make sure the primary key is always fetched
-		if (
-			!unref(fields)?.includes('*') &&
-			primaryKeyField.value &&
-			fieldsToFetch.includes(primaryKeyField.value.field) === false
-		) {
-			fieldsToFetch.push(primaryKeyField.value.field);
-		}
-
-		// Filter out fake internal columns. This is (among other things) for a fake $thumbnail m2o field
-		// on directus_files
-		fieldsToFetch = fieldsToFetch.filter((field) => field.startsWith('$') === false);
-
 		try {
 			currentRequest = axios.CancelToken.source();
 
 			const response = await api.get<any>(endpoint.value, {
-				params: {
-					limit: unref(limit),
-					fields: fieldsToFetch,
-					...(alias ? { alias: unref(alias) } : {}),
-					sort: unref(sort),
-					page: unref(page),
-					search: unref(search),
-					filter: unref(filter),
-					meta: ['filter_count', 'total_count'],
-				},
+				params: finalQuery.value,
 				cancelToken: currentRequest.token,
 			});
 
-			let fetchedItems = response.data.data;
-
-			/**
-			 * @NOTE
-			 *
-			 * This is used in conjunction with the fake field in /src/stores/fields/fields.ts to be
-			 * able to render out the directus_files collection (file library) using regular layouts
-			 *
-			 * Layouts expect the file to be a m2o of a `file` type, however, directus_files is the
-			 * only collection that doesn't have this (obviously). This fake $thumbnail field is used to
-			 * pretend there is a file m2o, so we can use the regular layout logic for files as well
-			 */
-			if (collection.value === 'directus_files') {
-				fetchedItems = fetchedItems.map((file: any) => ({
-					...file,
-					$thumbnail: file,
-				}));
-			}
-
-			items.value = fetchedItems;
-			totalCount.value = response.data.meta!.total_count!;
-			itemCount.value = response.data.meta!.filter_count!;
-
-			if (page && fetchedItems.length === 0 && page?.value !== 1) {
-				page.value = 1;
-			}
+			onItemChange(response.data);
 		} catch (err: any) {
 			if (!axios.isCancel(err)) {
 				error.value = err;
@@ -215,6 +193,35 @@ export function useItems(collection: Ref<string | null>, query: ComputedQuery, f
 			}
 
 			loading.value = false;
+		}
+	}
+
+	function onItemChange(data: Record<string, any>) {
+		let fetchedItems = data['data'];
+
+		/**
+		 * @NOTE
+		 *
+		 * This is used in conjunction with the fake field in /src/stores/fields/fields.ts to be
+		 * able to render out the directus_files collection (file library) using regular layouts
+		 *
+		 * Layouts expect the file to be a m2o of a `file` type, however, directus_files is the
+		 * only collection that doesn't have this (obviously). This fake $thumbnail field is used to
+		 * pretend there is a file m2o, so we can use the regular layout logic for files as well
+		 */
+		if (collection.value === 'directus_files') {
+			fetchedItems = fetchedItems.map((file: any) => ({
+				...file,
+				$thumbnail: file,
+			}));
+		}
+
+		items.value = fetchedItems;
+		totalCount.value = data['meta']?.total_count!;
+		itemCount.value = data['meta']?.filter_count!;
+
+		if (page && fetchedItems.length === 0 && page?.value !== 1) {
+			page.value = 1;
 		}
 	}
 
