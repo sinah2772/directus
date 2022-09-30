@@ -17,8 +17,6 @@ const oncloseCallbacks = new Set<() => void>()
 
 
 function connectWebSocket() {
-    if(ws !== null) return ws
-
     ws = new WebSocket("ws://localhost:8055/websocket")
 
     ws.onopen = async () => {
@@ -31,7 +29,7 @@ function connectWebSocket() {
         
         const message = JSON.parse(event.data);
         const type = message['type'].toUpperCase()
-        let uid = 'uid' in message? Number(message['uid']) : undefined;
+        let uid = 'uid' in message? message['uid'] : undefined;
     
         console.log("messageRecieved", message)
     
@@ -39,38 +37,47 @@ function connectWebSocket() {
             case 'PING':
                 ws.send(JSON.stringify({type: 'PONG'}))
                 break;
-            case 'AUTH':
-                uid = 0
-                console.log("Authentication response", message)
-                break;
         }
+
         if(uid !== undefined) {
             const callback = onMessageCallbacks.get(uid)
-            if(callback) callback(message)
+            if(callback !== undefined) callback(message)
         }
     }
 
     ws.onclose = () => {
-        ws = null
         oncloseCallbacks.forEach((callback) => callback())
-        setTimeout(() => {
-            connectWebSocket()
-        }, 10_000)
+        retryConnection()
     }
 
     ws.onerror = (error) => {
         console.error(error)
         ws?.close()
     }
+}
+let retryTimeout: NodeJS.Timeout | null = null
+function retryConnection() {
+    console.log("Retrying connection in 10 seconds")
 
-    
+    if(retryTimeout !== null) return;
+
+    ws?.close()
+    ws = null
+
+    retryTimeout = setTimeout(() => {
+        connectWebSocket()
+        retryTimeout = null
+    }, 10_000)
 }
 
 async function authenticate(ws: WebSocket) {
     let token = api.defaults.headers.common['Authorization']?.substring(7)
     const client = new Client(ws)
 
-    if(!token) return
+    if(!token) {
+        retryConnection()
+        return
+    }
 
     console.log("Authenticating with token", token)
 
@@ -100,21 +107,17 @@ async function authenticate(ws: WebSocket) {
 connectWebSocket()
 
 export function getWebSocket() {
-    return new Wrapper(ws!)
+    return new Wrapper()
 }
 
 class Wrapper implements WebSocketWrapper {
     connectCallbacks = new Set<(client: WebSocketClient) => void>()
     disconnectCallbacks = new Set<() => void>()
-    ws: WebSocket
-    client: WebSocketClient
 
-    constructor(ws: WebSocket) {
-        this.ws = ws
-        this.client = new Client(ws)
+    constructor() {
 
         onAuthCallbacks.add(() => {
-            this.connectCallbacks.forEach((callback) => callback(this.client))
+            this.connectCallbacks.forEach((callback) => callback(new Client(ws!)))
         })
         oncloseCallbacks.add(() => {
             this.disconnectCallbacks.forEach((callback) => callback())
@@ -125,7 +128,7 @@ class Wrapper implements WebSocketWrapper {
         this.connectCallbacks.add(callback)
 
         if(authenticated) {
-            callback(this.client)
+            callback(new Client(ws!))
         }
     }
 
@@ -137,7 +140,7 @@ class Wrapper implements WebSocketWrapper {
 
 class Client implements WebSocketClient {
     ws: WebSocket
-    
+
     constructor(ws: WebSocket) {
         this.ws = ws
     }
