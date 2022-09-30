@@ -76,18 +76,19 @@ function uuidv4() {
 }
 function sendMessage(msg) {
     if (ws && connected) {
-        msg.uid = uuidv4();
+        if (!msg.uid) msg.uid = uuidv4();
         addLog('Sending message: '+JSON.stringify(msg, null, 2));
         ws.send(JSON.stringify(msg));
     }
 }
 document.getElementById('connect-btn').addEventListener('click', function () {
     const _t = document.getElementById('connect-token').value;
-    const url = document.getElementById('connect-url').value + (_t ? '?access_token=' + _t : '');
+    const url = document.getElementById('connect-url').value;// + (_t ? '?access_token=' + _t : '');
     addLog(`Connecting to: ${url}`);
     ws = new WebSocket(url);
     ws.addEventListener('open', function (event) {
         addLog('Connection open');
+        setTimeout(() => ws.send(JSON.stringify({ type: "auth", access_token:_t, uid: "lala" })), 10);
         connected = true;
         document.getElementById('connect').classList.add('hidden');
         document.getElementById('socket').classList.remove('hidden');

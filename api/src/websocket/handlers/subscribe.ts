@@ -5,12 +5,13 @@ import emitter from '../../emitter';
 import logger from '../../logger';
 import { fmtMessage } from '../utils/message';
 import { refreshAccountability } from '../authenticate';
-import { omit } from 'lodash-es';
 import { MetaService } from '../../services';
 import { sanitizeQuery } from '../../utils/sanitize-query';
 import { handleWebsocketException, WebSocketException } from '../exceptions';
+import type { Accountability, SchemaOverview } from '@directus/shared/types';
 
 type UserFocus = {
+	user: string;
 	collection: string;
 	item: string | number;
 };
@@ -18,12 +19,12 @@ type UserFocus = {
 export class SubscribeHandler {
 	subscriptions: Record<string, Set<Subscription>>;
 	onlineStatus: Set<string>;
-	userFocus: Record<string, UserFocus>;
+	userFocus: Set<UserFocus>;
 
 	constructor() {
 		this.subscriptions = {};
 		this.onlineStatus = new Set();
-		this.userFocus = {};
+		this.userFocus = new Set();
 		this.bindWebsocket();
 		this.bindModules([
 			'items',
@@ -93,41 +94,53 @@ export class SubscribeHandler {
 		this.subscriptions[collection]?.add(subscription);
 	}
 	unsubscribe(client: WebSocketClient, uid?: string) {
-		for (const key of Object.keys(this.subscriptions)) {
-			const subscriptions = Array.from(this.subscriptions[key] || []);
-			for (let i = subscriptions.length - 1; i >= 0; i--) {
-				const subscription = subscriptions[i];
-				if (!subscription) continue;
-				if (subscription.client === client && (!uid || subscription.uid === uid)) {
-					this.subscriptions[key]?.delete(subscription);
+		if (uid !== undefined) {
+			const subscription = this.getSubscription(uid);
+			if (subscription && subscription.client === client) {
+				this.subscriptions[subscription.collection]?.delete(subscription);
+				this.removeFocus(client, subscription);
+				this.dispatch(subscription.collection, { action: 'focus' });
+			} else {
+				// logger.warn(`Couldn't find subscription with UID="${uid}" for current user`);
+			}
+		} else {
+			for (const key of Object.keys(this.subscriptions)) {
+				const subscriptions = Array.from(this.subscriptions[key] || []);
+				for (let i = subscriptions.length - 1; i >= 0; i--) {
+					const subscription = subscriptions[i];
+					if (!subscription) continue;
+					if (subscription.client === client && (!uid || subscription.uid === uid)) {
+						this.subscriptions[key]?.delete(subscription);
+						this.removeFocus(client, subscription);
+						this.dispatch(subscription.collection, { action: 'focus' });
+					}
 				}
 			}
 		}
 	}
-	async dispatch(collection: string, data: any) {
+	async dispatch(collection: string, data: Record<string, any>) {
 		const subscriptions = this.subscriptions[collection] ?? new Set();
 		for (const subscription of subscriptions) {
-			const { uid, client, query = {} } = subscription;
+			const { client } = subscription;
+			if (data['action'] === 'focus' && !(subscription.status && 'item' in subscription)) {
+				continue; // skip focus updates if not applicable
+			}
+			if (
+				data['action'] === 'status' &&
+				'item' in subscription &&
+				!(subscription.collection === 'directus_users' && subscription.status)
+			) {
+				continue; // skip status updates if not applicable
+			}
 			try {
 				const accountability = await refreshAccountability(client.accountability);
 				client.accountability = accountability;
 				const schema = await getSchema({ accountability });
-				const service = new ItemsService(collection, { schema, accountability });
-				const metaService = new MetaService({ schema, accountability });
-				// get the payload based on the provided query
-				// const keys = data.key ? [data.key] : data.keys;
-				// const payload = data.action === 'delete' ? data.payload : await service.readMany(keys, query);
-				// if (payload.length > 0) {
-				// 	client.send(fmtMessage('subscription',
-				// 		{ payload: 'key' in data ? payload[0] : payload, event: data.action },
-				// 		uid));
-				// }
-				const payload = await service.readByQuery(query);
-				const meta = await metaService.getMetaForQuery(collection, query);
-				const msg: Record<string, any> = { payload, event: data.action };
-				if (subscription.status) msg['status'] = { online: Array.from(this.onlineStatus) };
-				if ('meta' in (subscription.query ?? {})) msg['meta'] = meta;
-				client.send(fmtMessage('subscription', msg, uid));
+				const result =
+					'item' in subscription
+						? await this.getSinglePayload(subscription, accountability, schema, data['action'])
+						: await this.getMultiPayload(subscription, accountability, schema, data['action']);
+				client.send(fmtMessage('subscription', result, subscription.uid));
 			} catch (err) {
 				handleWebsocketException(client, err, 'subscribe');
 				// logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
@@ -138,41 +151,122 @@ export class SubscribeHandler {
 		if (message.type === 'SUBSCRIBE') {
 			logger.debug(`[WS REST] SubscribeHandler ${JSON.stringify(message)}`);
 			try {
-				const collection = message['collection']!;
+				const collection = message.collection!;
 				const accountability = client.accountability;
 				const schema = await getSchema(accountability ? { accountability } : {});
 				if (!(await schema.hasCollection(collection))) {
 					throw new WebSocketException(
-						'items',
+						'subscribe',
 						'INVALID_COLLECTION',
 						'The provided collection does not exists or is not accessible.',
 						message.uid
 					);
 				}
-				const service = new ItemsService(collection, { schema, accountability });
-				const metaService = new MetaService({ schema, accountability });
-				const subscription: Subscription = { ...omit(message, 'type'), client };
-				const query = sanitizeQuery(message['query'] ?? {}, accountability);
-				// if not authorized the read should throw an error
-				const initialPayload = await service.readByQuery(query);
-				// subscribe to events if all went well
-				this.subscribe(subscription);
-				// send initial data
-				const meta = await metaService.getMetaForQuery(collection, query);
-				const msg: Record<string, any> = { payload: initialPayload, event: 'init' };
-				if (collection === 'directus_users' && subscription.status) {
-					msg['status'] = { online: Array.from(this.onlineStatus) };
+
+				const subscription: Subscription = {
+					client,
+					collection,
+					status: !!message.status,
+				};
+				if ('query' in message) {
+					subscription.query = sanitizeQuery(message.query, accountability);
 				}
-				if ('meta' in (subscription.query ?? {})) msg['meta'] = meta;
-				client.send(fmtMessage('subscription', msg, message.uid));
+				if ('item' in message) subscription.item = message.item;
+				if ('uid' in message) subscription.uid = message.uid;
+				// remove the subscription if it already exists
+				this.unsubscribe(client, subscription.uid);
+
+				let data: Record<string, any>;
+				if ('item' in subscription) {
+					data = await this.getSinglePayload(subscription, accountability, schema);
+					this.addFocus(client, subscription);
+				} else {
+					data = await this.getMultiPayload(subscription, accountability, schema);
+				}
+				// if no errors were thrown register the subscription
+				this.subscribe(subscription);
+				this.dispatch(subscription.collection, { action: 'focus' });
+				if (!subscription.status || !('item' in subscription) || subscription.collection !== 'directus_users') {
+					// prevent double events for init and focus
+					client.send(fmtMessage('subscription', data, subscription.uid));
+				}
 			} catch (err) {
 				handleWebsocketException(client, err, 'subscribe');
 				// logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
 			}
 		}
 		if (message.type === 'UNSUBSCRIBE') {
-			this.unsubscribe(client, message['uid']);
+			this.unsubscribe(client, message.uid);
 		}
+	}
+	private async getSinglePayload(
+		subscription: Subscription,
+		accountability: Accountability | null,
+		schema: SchemaOverview,
+		event = 'init'
+	): Promise<Record<string, any>> {
+		const service = new ItemsService(subscription.collection, { schema, accountability });
+		const metaService = new MetaService({ schema, accountability });
+		const query = subscription.query ?? {};
+		const id = subscription.item!;
+
+		const result: Record<string, any> = { event };
+		result['payload'] = await service.readOne(id, query);
+		if ('meta' in query) {
+			result['meta'] = await metaService.getMetaForQuery(subscription.collection, query);
+		}
+		if (subscription.status) {
+			const focus = Array.from(this.userFocus)
+				.filter(({ collection, item }) => collection === subscription.collection && item === subscription.item)
+				.map(({ user }) => user);
+			result['status'] = { focus: Array.from(new Set(focus)) };
+		}
+		return result;
+	}
+	private async getMultiPayload(
+		subscription: Subscription,
+		accountability: Accountability | null,
+		schema: SchemaOverview,
+		event = 'init'
+	): Promise<Record<string, any>> {
+		const service = new ItemsService(subscription.collection, { schema, accountability });
+		const metaService = new MetaService({ schema, accountability });
+		const query = subscription.query ?? {};
+		const result: Record<string, any> = { event };
+		result['payload'] = await service.readByQuery(query);
+		if ('meta' in query) {
+			result['meta'] = await metaService.getMetaForQuery(subscription.collection, query);
+		}
+		if (subscription.collection === 'directus_users' && subscription.status) {
+			result['status'] = { online: Array.from(this.onlineStatus) };
+		}
+		return result;
+	}
+	private getSubscription(uid: string) {
+		for (const subList of Object.values(this.subscriptions)) {
+			for (const subscription of subList) {
+				if (subscription.uid === uid) {
+					return subscription;
+				}
+			}
+		}
+		return undefined;
+	}
+	private addFocus(client: WebSocketClient, subscription: Subscription) {
+		if (!client.accountability?.user || !subscription.item) return;
+		this.userFocus.add({
+			user: client.accountability.user,
+			collection: subscription.collection,
+			item: subscription.item,
+		} as UserFocus);
+	}
+	private removeFocus(client: WebSocketClient, subscription: Subscription) {
+		if (!client.accountability?.user || !subscription.item) return;
+		this.userFocus.delete({
+			user: client.accountability.user,
+			collection: subscription.collection,
+			item: subscription.item,
+		} as UserFocus);
 	}
 	private userOnline(client: WebSocketClient) {
 		const userId = client.accountability?.user;
