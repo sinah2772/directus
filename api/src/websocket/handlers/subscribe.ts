@@ -22,6 +22,7 @@ export class SubscribeHandler {
 			'activity',
 			'collections',
 			'fields',
+			'files',
 			'folders',
 			'permissions',
 			'presets',
