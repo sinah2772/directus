@@ -121,13 +121,14 @@ export default abstract class SocketController {
 			try {
 				await this.rateLimiter.consume(client.uid);
 			} catch (limit) {
-				const timeout = (limit as any)?.msBeforeNext ?? this.rateLimiter.msBlockDuration;
+				const timeout = (limit as any)?.msBeforeNext ?? this.rateLimiter.msDuration;
 				const error = new WebSocketException(
 					'server',
 					'REQUESTS_EXCEEDED',
 					`Rate limit reached! Try again in ${timeout}ms`
 				);
 				handleWebsocketException(client, error);
+				this.log(`${client.accountability?.user || 'public user'} rate limited`);
 				return;
 			}
 			let message: WebSocketMessage;
