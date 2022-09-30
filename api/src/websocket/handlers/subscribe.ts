@@ -3,19 +3,27 @@ import { ItemsService } from '../../services/items';
 import type { SubscribeMessage, Subscription, WebSocketClient } from '../types';
 import emitter from '../../emitter';
 import logger from '../../logger';
-import { errorMessage, fmtMessage } from '../utils/message';
+import { fmtMessage } from '../utils/message';
 import { refreshAccountability } from '../authenticate';
 import { omit } from 'lodash-es';
 import { MetaService } from '../../services';
 import { sanitizeQuery } from '../../utils/sanitize-query';
+import { handleWebsocketException } from '../exceptions';
+
+type UserFocus = {
+	collection: string;
+	item: string | number;
+};
 
 export class SubscribeHandler {
 	subscriptions: Record<string, Set<Subscription>>;
 	onlineStatus: Set<string>;
+	userFocus: Record<string, UserFocus>;
 
 	constructor() {
 		this.subscriptions = {};
 		this.onlineStatus = new Set();
+		this.userFocus = {};
 		this.bindWebsocket();
 		this.bindModules([
 			'items',
@@ -38,8 +46,8 @@ export class SubscribeHandler {
 		emitter.onAction('websocket.message', ({ client, message }) => {
 			try {
 				this.onMessage(client, message as SubscribeMessage);
-			} catch (err: any) {
-				return client.send(errorMessage(err, message['uid']));
+			} catch (error) {
+				handleWebsocketException(client, error, 'subscribe');
 			}
 		});
 		emitter.onAction('websocket.connect', ({ client }) => {
@@ -120,8 +128,9 @@ export class SubscribeHandler {
 				if (subscription.status) msg['status'] = { online: Array.from(this.onlineStatus) };
 				if ('meta' in (subscription.query ?? {})) msg['meta'] = meta;
 				client.send(fmtMessage('subscription', msg, uid));
-			} catch (err: any) {
-				logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
+			} catch (err) {
+				handleWebsocketException(client, err, 'subscribe');
+				// logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
 			}
 		}
 	}
@@ -148,8 +157,9 @@ export class SubscribeHandler {
 				}
 				if ('meta' in (subscription.query ?? {})) msg['meta'] = meta;
 				client.send(fmtMessage('subscription', msg, message['uid']));
-			} catch (err: any) {
-				logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
+			} catch (err) {
+				handleWebsocketException(client, err, 'subscribe');
+				// logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
 			}
 		}
 		if (message.type === 'UNSUBSCRIBE') {

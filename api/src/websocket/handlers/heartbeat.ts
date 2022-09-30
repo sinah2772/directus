@@ -29,13 +29,14 @@ export class HeartbeatHandler {
 		}
 		if (!hasClients && this.pulse) {
 			clearInterval(this.pulse);
-			this.pulse = undefined; // do we need this?
+			this.pulse = undefined;
 		}
 	}
 	onMessage(client: WebSocketClient, message: WebSocketMessage) {
 		if (trimUpper(message.type) !== 'PING') return;
 		// send pong message back as acknowledgement
-		client.send(fmtMessage('pong', message['uid'] ? { uid: message['uid'] } : {}));
+		const data = 'uid' in message ? { uid: message.uid } : {};
+		client.send(fmtMessage('pong', data));
 	}
 	pingClients() {
 		const pendingClients = new Set<WebSocketClient>(this.controller.clients);

@@ -1,12 +1,11 @@
 import type WebSocket from 'ws';
 import type { Server as httpServer } from 'http';
 import type { AuthenticationState, WebSocketClient, WebSocketMessage } from '../types';
-import logger from '../../logger';
 import env from '../../env';
 import SocketController from './base';
 import emitter from '../../emitter';
-import { errorMessage } from '../utils/message';
 import { refreshAccountability } from '../authenticate';
+import { handleWebsocketException } from '../exceptions';
 
 export class WebsocketController extends SocketController {
 	constructor(httpServer: httpServer) {
@@ -24,9 +23,8 @@ export class WebsocketController extends SocketController {
 				message = await emitter.emitFilter('websocket.message', message, { client });
 				client.accountability = await refreshAccountability(client.accountability);
 				emitter.emitAction('websocket.message', { message, client });
-			} catch (err: any) {
-				logger.error(err);
-				client.send(errorMessage(err.message));
+			} catch (error) {
+				handleWebsocketException(client, error);
 				return;
 			}
 		});
