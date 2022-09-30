@@ -1,26 +1,34 @@
 import type { BaseException } from '@directus/shared/exceptions';
-import type { WebSocketClient } from '../types';
+import type { ResponseMessage, WebSocketClient } from '../types';
 
 /**
  * Message utils
  */
-export const trimUpper = (str: string) => str.trim().toUpperCase();
+export const trimUpper = (str: string) => (str ?? '').trim().toUpperCase();
 export const stringify = (msg: any) => (typeof msg === 'string' ? msg : JSON.stringify(msg));
 
 export const fmtMessage = (type: string, data: Record<string, any> = {}, uid?: string) => {
-	return JSON.stringify({ type, ...data, ...(uid ? { uid } : {}) });
+	const message: Record<string, any> = { type, ...data };
+	if (uid !== undefined) {
+		message['uid'] = uid;
+	}
+	return JSON.stringify(message);
 };
-export const errorMessage = (error: BaseException | string, uid?: string) => {
-	return JSON.stringify({
-		error:
-			typeof error === 'string'
-				? { code: 'UNKOWN', message: error }
-				: {
-						code: error.code,
-						message: error.message,
-				  },
-		...(uid ? { uid } : {}),
-	});
+// deprecated
+export const errorMessage = (type: string, error: BaseException | { code: string; message: string }, uid?: string) => {
+	const { code = 'UNKNOWN', message: errMsg = '' } = error;
+	const message: ResponseMessage = {
+		type,
+		status: 'error',
+		error: {
+			code,
+			message: errMsg,
+		},
+	};
+	if (uid !== undefined) {
+		message.uid = uid;
+	}
+	return JSON.stringify(message);
 };
 
 // we may need this later for slow connections

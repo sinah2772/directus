@@ -7,14 +7,12 @@ import { parse } from 'url';
 import logger from '../../logger';
 import { getAccountabilityForToken } from '../../utils/get-accountability-for-token';
 import { getExpiresAtForToken } from '../utils/get-expires-at-for-token';
-import { authenticateConnection, authenticationError, authenticationSuccess } from '../authenticate';
-import { AuthenticationFailedException } from '../../exceptions/authentication-failed';
+import { authenticateConnection, authenticationSuccess } from '../authenticate';
 import type { AuthenticationState, AuthMessage, WebSocketClient, WebSocketMessage } from '../types';
-
-import { errorMessage } from '../utils/message';
 import { waitForAnyMessage, waitForMessageType } from '../utils/wait-for-message';
 import { parseIncomingMessage } from '../utils/parse-incoming-message';
-import { InvalidPayloadException, TokenExpiredException } from '../../exceptions';
+import { TokenExpiredException } from '../../exceptions';
+import { handleWebsocketException, WebSocketException } from '../exceptions';
 import emitter from '../../emitter';
 
 type UpgradeContext = {
@@ -79,7 +77,7 @@ export default abstract class SocketController {
 			expiresAt = null;
 		}
 		if (!accountability || !accountability.user) {
-			logger.debug('Websocket upgrade denied - ' + JSON.stringify(accountability || 'invalid'));
+			logger.warn('Websocket upgrade denied - ' + JSON.stringify(accountability || 'invalid'));
 			socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
 			socket.destroy();
 			return;
@@ -93,14 +91,14 @@ export default abstract class SocketController {
 		this.server.handleUpgrade(request, socket, head, async (ws) => {
 			try {
 				const payload: WebSocketMessage = await waitForAnyMessage(ws, this.authentication.timeout);
-				if (payload.type !== 'AUTH') {
-					throw new AuthenticationFailedException();
-				}
+				if (payload.type !== 'AUTH') throw new Error();
+
 				const state = await authenticateConnection(payload as AuthMessage);
 				ws.send(authenticationSuccess(payload['uid']));
 				this.server.emit('connection', ws, state);
 			} catch {
-				ws.send(errorMessage(new AuthenticationFailedException()));
+				const error = new WebSocketException('auth', 'AUTH_FAILED', 'Authentication handshake failed.');
+				handleWebsocketException(ws, error, 'auth');
 				ws.close();
 			}
 		});
@@ -116,27 +114,13 @@ export default abstract class SocketController {
 			try {
 				message = parseIncomingMessage(data.toString());
 			} catch (err: any) {
-				client.send(errorMessage(new InvalidPayloadException(err)));
+				handleWebsocketException(client, err);
 				return;
 			}
 			this.log(JSON.stringify(message));
 			if (message.type === 'AUTH') {
-				try {
-					const { accountability, expiresAt } = await authenticateConnection(message as AuthMessage);
-					client.accountability = accountability;
-					client.expiresAt = expiresAt;
-					this.setTokenExpireTimer(client);
-					emitter.emitAction('websocket.auth.success', { client });
-					client.send(authenticationSuccess(message['uid']));
-					this.log(`${client.accountability?.user || 'public user'} authenticated`);
-					return;
-				} catch (err) {
-					this.log(`${client.accountability?.user || 'public user'} failed authentication`);
-					emitter.emitAction('websocket.auth.failure', { client });
-					client.accountability = null;
-					client.expiresAt = null;
-					client.send(authenticationError(message['uid']));
-				}
+				await this.handleAuthRequest(client, message as AuthMessage);
+				return;
 			}
 			ws.emit('parsed-message', message);
 		});
@@ -155,6 +139,30 @@ export default abstract class SocketController {
 		this.clients.add(client);
 		return client;
 	}
+	private async handleAuthRequest(client: WebSocketClient, message: AuthMessage) {
+		try {
+			const { accountability, expiresAt } = await authenticateConnection(message);
+			client.accountability = accountability;
+			client.expiresAt = expiresAt;
+			this.setTokenExpireTimer(client);
+			emitter.emitAction('websocket.auth.success', { client });
+
+			client.send(authenticationSuccess(message.uid));
+			this.log(`${client.accountability?.user || 'public user'} authenticated`);
+			return;
+		} catch (error) {
+			this.log(`${client.accountability?.user || 'public user'} failed authentication`);
+			emitter.emitAction('websocket.auth.failure', { client });
+
+			client.accountability = null;
+			client.expiresAt = null;
+			const _error =
+				error instanceof WebSocketException
+					? error
+					: new WebSocketException('auth', 'AUTH_FAILED', 'Authentication failed.', message.uid);
+			handleWebsocketException(client, _error, 'auth');
+		}
+	}
 	setTokenExpireTimer(client: WebSocketClient) {
 		if (this.authTimer) clearTimeout(this.authTimer);
 		if (!client.expiresAt) return;
@@ -162,9 +170,10 @@ export default abstract class SocketController {
 		this.authTimer = setTimeout(() => {
 			client.accountability = null;
 			client.expiresAt = null;
-			client.send(authenticationError(new TokenExpiredException()));
+			handleWebsocketException(client, new TokenExpiredException(), 'auth');
 			waitForMessageType(client, 'AUTH', this.authentication.timeout).catch((msg: WebSocketMessage) => {
-				client.send(authenticationError(undefined, msg['uid']));
+				const error = new WebSocketException('auth', 'AUTH_TIMEOUT', 'Authentication timed out.', msg.uid);
+				handleWebsocketException(client, error);
 				if (this.authentication.mode !== 'public') {
 					client.close();
 				}
