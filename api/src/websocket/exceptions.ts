@@ -45,5 +45,5 @@ export function handleWebsocketException(client: WebSocketClient | WebSocket, er
 		return;
 	}
 	// unhandled exceptions
-	logger.error('Unhandled exception', type, error);
+	logger.error('Unhandled exception' + JSON.stringify({ type, error }));
 }

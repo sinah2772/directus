@@ -8,7 +8,7 @@ import { refreshAccountability } from '../authenticate';
 import { omit } from 'lodash-es';
 import { MetaService } from '../../services';
 import { sanitizeQuery } from '../../utils/sanitize-query';
-import { handleWebsocketException } from '../exceptions';
+import { handleWebsocketException, WebSocketException } from '../exceptions';
 
 type UserFocus = {
 	collection: string;
@@ -136,11 +136,19 @@ export class SubscribeHandler {
 	}
 	async onMessage(client: WebSocketClient, message: SubscribeMessage) {
 		if (message.type === 'SUBSCRIBE') {
-			const collection = message['collection']!;
 			logger.debug(`[WS REST] SubscribeHandler ${JSON.stringify(message)}`);
 			try {
+				const collection = message['collection']!;
 				const accountability = client.accountability;
 				const schema = await getSchema(accountability ? { accountability } : {});
+				if (!(await schema.hasCollection(collection))) {
+					throw new WebSocketException(
+						'items',
+						'INVALID_COLLECTION',
+						'The provided collection does not exists or is not accessible.',
+						message.uid
+					);
+				}
 				const service = new ItemsService(collection, { schema, accountability });
 				const metaService = new MetaService({ schema, accountability });
 				const subscription: Subscription = { ...omit(message, 'type'), client };
@@ -156,7 +164,7 @@ export class SubscribeHandler {
 					msg['status'] = { online: Array.from(this.onlineStatus) };
 				}
 				if ('meta' in (subscription.query ?? {})) msg['meta'] = meta;
-				client.send(fmtMessage('subscription', msg, message['uid']));
+				client.send(fmtMessage('subscription', msg, message.uid));
 			} catch (err) {
 				handleWebsocketException(client, err, 'subscribe');
 				// logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);

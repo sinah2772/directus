@@ -20,12 +20,17 @@ export class ItemsHandler {
 	}
 	async onMessage(client: WebSocketClient, message: WebSocketMessage) {
 		if (trimUpper(message.type) !== 'ITEMS') return;
-		const uid = message['uid'];
-		if (typeof message['collection'] !== 'string' || message['collection'].length === 0) {
-			throw new WebSocketException('items', 'MISSING_COLLECTION', 'No collection was provided.', uid);
-		}
+		const uid = message.uid;
 		const accountability = client.accountability;
 		const schema = await getSchema(accountability ? { accountability } : {});
+		if (!(await schema.hasCollection(message['collection']))) {
+			throw new WebSocketException(
+				'items',
+				'INVALID_COLLECTION',
+				'The provided collection does not exists or is not accessible.',
+				uid
+			);
+		}
 		const service = new ItemsService(message['collection'], { schema, accountability });
 		const metaService = new MetaService({ schema, accountability });
 		if (!['create', 'read', 'update', 'delete'].includes(message['action'])) {
