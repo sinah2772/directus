@@ -14,6 +14,9 @@ import { parseIncomingMessage } from '../utils/parse-incoming-message';
 import { TokenExpiredException } from '../../exceptions';
 import { handleWebsocketException, WebSocketException } from '../exceptions';
 import emitter from '../../emitter';
+import { createRateLimiter } from '../../rate-limiter';
+import type { RateLimiterAbstract } from 'rate-limiter-flexible';
+import { v4 as uuid } from 'uuid';
 
 type UpgradeContext = {
 	request: IncomingMessage;
@@ -31,6 +34,7 @@ export default abstract class SocketController {
 	};
 	endpoint: string;
 	private authTimer: NodeJS.Timer | null;
+	private rateLimiter: RateLimiterAbstract;
 
 	constructor(
 		httpServer: httpServer,
@@ -47,6 +51,9 @@ export default abstract class SocketController {
 		this.name = name;
 		this.endpoint = endpoint;
 		this.authentication = authentication;
+		this.rateLimiter = createRateLimiter({
+			keyPrefix: 'websocket',
+		});
 		httpServer.on('upgrade', this.handleUpgrade.bind(this));
 	}
 	private async handleUpgrade(request: IncomingMessage, socket: internal.Duplex, head: Buffer) {
@@ -107,9 +114,22 @@ export default abstract class SocketController {
 		const client = ws as WebSocketClient;
 		client.accountability = accountability;
 		client.expiresAt = expiresAt;
+		client.uid = uuid();
 
 		ws.on('message', async (data: WebSocket.RawData) => {
 			this.log(`${client.accountability?.user || 'public user'} message`);
+			try {
+				await this.rateLimiter.consume(client.uid);
+			} catch (limit) {
+				const timeout = (limit as any)?.msBeforeNext ?? this.rateLimiter.msBlockDuration;
+				const error = new WebSocketException(
+					'server',
+					'REQUESTS_EXCEEDED',
+					`Rate limit reached! Try again in ${timeout}ms`
+				);
+				handleWebsocketException(client, error);
+				return;
+			}
 			let message: WebSocketMessage;
 			try {
 				message = parseIncomingMessage(data.toString());

@@ -7,7 +7,7 @@ export type AuthenticationState = {
 	expiresAt: number | null;
 };
 
-export type WebSocketClient = WebSocket & AuthenticationState;
+export type WebSocketClient = WebSocket & AuthenticationState & { uid: string };
 export type UpgradeRequest = IncomingMessage & AuthenticationState;
 
 export type Subscription = {
