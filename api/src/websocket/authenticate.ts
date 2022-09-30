@@ -60,7 +60,7 @@ export function authenticationError(error?: BaseException, uid?: string): string
 			code: error.code,
 			message: error.message,
 		},
-		...(uid ? { uid } : {}),
+		...(uid !== undefined ? { uid } : {}),
 	} as ResponseMessage);
 }
 
@@ -68,6 +68,6 @@ export function authenticationSuccess(uid?: string): string {
 	return JSON.stringify({
 		type: 'auth',
 		status: 'ok',
-		...(uid ? { uid } : {}),
+		...(uid !== undefined ? { uid } : {}),
 	} as ResponseMessage);
 }
