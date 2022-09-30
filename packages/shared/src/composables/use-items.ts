@@ -139,8 +139,7 @@ export function useItems(collection: Ref<string | null>, query: ComputedQuery, f
 				collection: newCollection!,
 				query: newQuery
 			}, (data) => {
-				console.log("Data Changed!!!", data)
-				items.value = data['payload']
+				onItemChange({data: data['payload'], meta: data['meta']})
 			})
 		}, {immediate: true})
 
@@ -196,8 +195,8 @@ export function useItems(collection: Ref<string | null>, query: ComputedQuery, f
 		}
 	}
 
-	function onItemChange(data: Record<string, any>) {
-		let fetchedItems = data['data'];
+	function onItemChange(data: {data: Record<string, any>[], meta: Record<string, any>}) {
+		let fetchedItems = data.data;
 
 		/**
 		 * @NOTE
@@ -210,17 +209,17 @@ export function useItems(collection: Ref<string | null>, query: ComputedQuery, f
 		 * pretend there is a file m2o, so we can use the regular layout logic for files as well
 		 */
 		if (collection.value === 'directus_files') {
-			fetchedItems = fetchedItems.map((file: any) => ({
+			fetchedItems = fetchedItems['map']((file: any) => ({
 				...file,
 				$thumbnail: file,
 			}));
 		}
 
 		items.value = fetchedItems;
-		totalCount.value = data['meta']?.total_count!;
-		itemCount.value = data['meta']?.filter_count!;
+		totalCount.value = data.meta?.['total_count']!;
+		itemCount.value = data.meta?.['filter_count']!;
 
-		if (page && fetchedItems.length === 0 && page?.value !== 1) {
+		if (page && fetchedItems['length'] === 0 && page?.value !== 1) {
 			page.value = 1;
 		}
 	}
