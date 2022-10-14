@@ -1,6 +1,7 @@
 import type { Accountability, Query } from '@directus/shared/types';
 import type { WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
+import type internal from 'stream';
 
 export type AuthenticationState = {
 	accountability: Accountability | null;
@@ -54,3 +55,16 @@ export type AuthMessage =
 	| { type: 'AUTH'; email: string; password: string; uid?: string }
 	| { type: 'AUTH'; access_token: string; uid?: string }
 	| { type: 'AUTH'; refresh_token: string; uid?: string };
+
+export type UpgradeContext = {
+	request: IncomingMessage;
+	socket: internal.Duplex;
+	head: Buffer;
+};
+
+export type ConnectionParams = {
+	email?: string;
+	password?: string;
+	access_token?: string;
+	refresh_token?: string;
+};

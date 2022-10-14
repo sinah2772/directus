@@ -1,21 +1,20 @@
-import type { WebSocket, MessageEvent } from 'ws';
+import type { WebSocket, RawData } from 'ws';
 import type { WebSocketMessage } from '../types';
 import { trimUpper } from './message';
-import { parseIncomingMessage } from './parse-incoming-message';
 
 export const waitForAnyMessage = (client: WebSocket, timeout: number): Promise<WebSocketMessage> => {
 	return new Promise((resolve, reject) => {
-		client.addEventListener('message', awaitMessage);
+		client.on('message', awaitMessage);
 		const timer = setTimeout(() => {
-			client.removeEventListener('message', awaitMessage);
+			client.off('message', awaitMessage);
 			reject();
 		}, timeout);
 
-		function awaitMessage(event: MessageEvent) {
+		function awaitMessage(event: RawData) {
 			try {
 				clearTimeout(timer);
-				client.removeEventListener('message', awaitMessage);
-				resolve(parseIncomingMessage(event.data as string));
+				client.off('message', awaitMessage);
+				resolve(JSON.parse(event.toString()));
 			} catch (err) {
 				reject(err);
 			}
@@ -24,25 +23,24 @@ export const waitForAnyMessage = (client: WebSocket, timeout: number): Promise<W
 };
 
 export const waitForMessageType = (client: WebSocket, type: string, timeout: number): Promise<WebSocketMessage> => {
-	type = trimUpper(type);
 	return new Promise((resolve, reject) => {
-		client.addEventListener('message', awaitMessage);
+		client.on('message', awaitMessage);
 		const timer = setTimeout(() => {
-			client.removeEventListener('message', awaitMessage);
+			client.off('message', awaitMessage);
 			reject();
 		}, timeout);
 
-		function awaitMessage(event: MessageEvent) {
+		function awaitMessage(event: RawData) {
 			let msg: WebSocketMessage;
 			try {
-				msg = parseIncomingMessage(event.data as string);
+				msg = JSON.parse(event.toString());
 			} catch {
 				return;
 			}
 			try {
-				if (msg.type === type) {
+				if (trimUpper(msg.type) === trimUpper(type)) {
 					clearTimeout(timer);
-					client.removeEventListener('message', awaitMessage);
+					client.off('message', awaitMessage);
 					resolve(msg);
 				}
 			} catch (err) {

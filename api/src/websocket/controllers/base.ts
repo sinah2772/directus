@@ -8,21 +8,15 @@ import logger from '../../logger';
 import { getAccountabilityForToken } from '../../utils/get-accountability-for-token';
 import { getExpiresAtForToken } from '../utils/get-expires-at-for-token';
 import { authenticateConnection, authenticationSuccess } from '../authenticate';
-import type { AuthenticationState, AuthMessage, WebSocketClient, WebSocketMessage } from '../types';
+import type { AuthenticationState, AuthMessage, UpgradeContext, WebSocketClient, WebSocketMessage } from '../types';
 import { waitForAnyMessage, waitForMessageType } from '../utils/wait-for-message';
-import { parseIncomingMessage } from '../utils/parse-incoming-message';
 import { TokenExpiredException } from '../../exceptions';
 import { handleWebsocketException, WebSocketException } from '../exceptions';
 import emitter from '../../emitter';
 import { createRateLimiter } from '../../rate-limiter';
 import type { RateLimiterAbstract } from 'rate-limiter-flexible';
 import { v4 as uuid } from 'uuid';
-
-type UpgradeContext = {
-	request: IncomingMessage;
-	socket: internal.Duplex;
-	head: Buffer;
-};
+import { trimUpper } from '../utils/message';
 
 export default abstract class SocketController {
 	name: string;
@@ -31,6 +25,7 @@ export default abstract class SocketController {
 	authentication: {
 		mode: 'public' | 'handshake' | 'strict';
 		timeout: number;
+		verbose: boolean;
 	};
 	endpoint: string;
 	private authTimer: NodeJS.Timer | null;
@@ -42,6 +37,7 @@ export default abstract class SocketController {
 		endpoint: string,
 		authentication: {
 			mode: 'public' | 'handshake' | 'strict';
+			verbose: boolean;
 			timeout: number;
 		}
 	) {
@@ -56,7 +52,7 @@ export default abstract class SocketController {
 		});
 		httpServer.on('upgrade', this.handleUpgrade.bind(this));
 	}
-	private async handleUpgrade(request: IncomingMessage, socket: internal.Duplex, head: Buffer) {
+	protected async handleUpgrade(request: IncomingMessage, socket: internal.Duplex, head: Buffer) {
 		const { pathname, query } = parse(request.url!, true);
 		if (pathname !== this.endpoint) return;
 		const context: UpgradeContext = { request, socket, head };
@@ -73,7 +69,7 @@ export default abstract class SocketController {
 			this.server.emit('connection', ws, state);
 		});
 	}
-	private async handleStrictUpgrade({ request, socket, head }: UpgradeContext, query: ParsedUrlQuery) {
+	protected async handleStrictUpgrade({ request, socket, head }: UpgradeContext, query: ParsedUrlQuery) {
 		let accountability: Accountability | null, expiresAt: number | null;
 		try {
 			const token = query['access_token'] as string;
@@ -94,7 +90,7 @@ export default abstract class SocketController {
 			this.server.emit('connection', ws, state);
 		});
 	}
-	private async handleHandshakeUpgrade({ request, socket, head }: UpgradeContext) {
+	protected async handleHandshakeUpgrade({ request, socket, head }: UpgradeContext) {
 		this.server.handleUpgrade(request, socket, head, async (ws) => {
 			try {
 				const payload: WebSocketMessage = await waitForAnyMessage(ws, this.authentication.timeout);
@@ -133,13 +129,13 @@ export default abstract class SocketController {
 			}
 			let message: WebSocketMessage;
 			try {
-				message = parseIncomingMessage(data.toString());
+				message = this.parseMessage(data.toString());
 			} catch (err: any) {
 				handleWebsocketException(client, err);
 				return;
 			}
 			this.log(JSON.stringify(message));
-			if (message.type === 'AUTH') {
+			if (trimUpper(message.type) === 'AUTH') {
 				await this.handleAuthRequest(client, message as AuthMessage);
 				return;
 			}
@@ -160,15 +156,25 @@ export default abstract class SocketController {
 		this.clients.add(client);
 		return client;
 	}
-	private async handleAuthRequest(client: WebSocketClient, message: AuthMessage) {
+	protected parseMessage(data: string) {
+		let message: WebSocketMessage;
+		try {
+			message = JSON.parse(data);
+		} catch (err: any) {
+			throw new WebSocketException('server', 'INVALID_PAYLOAD', 'Unable to parse the incoming message!');
+		}
+		return message;
+	}
+	protected async handleAuthRequest(client: WebSocketClient, message: AuthMessage) {
 		try {
 			const { accountability, expiresAt } = await authenticateConnection(message);
 			client.accountability = accountability;
 			client.expiresAt = expiresAt;
 			this.setTokenExpireTimer(client);
 			emitter.emitAction('websocket.auth.success', { client });
-
-			client.send(authenticationSuccess(message.uid));
+			if (this.authentication.verbose) {
+				client.send(authenticationSuccess(message.uid));
+			}
 			this.log(`${client.accountability?.user || 'public user'} authenticated`);
 			return;
 		} catch (error) {
