@@ -6,6 +6,7 @@ import {
 	RateLimiterMemory,
 	RateLimiterRedis,
 } from 'rate-limiter-flexible';
+import Redis from 'ioredis';
 import env from './env.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 
@@ -30,7 +31,6 @@ function getConfig(
 	const config: any = getConfigFromEnv('RATE_LIMITER_', `RATE_LIMITER_${store}_`);
 
 	if (store === 'redis') {
-		const Redis = require('ioredis');
 		delete config.redis;
 		config.storeClient = new Redis(env['RATE_LIMITER_REDIS'] || getConfigFromEnv('RATE_LIMITER_REDIS_'));
 	}
