@@ -199,7 +199,7 @@ export default abstract class SocketController {
 			client.expiresAt = null;
 			handleWebsocketException(client, new TokenExpiredException(), 'auth');
 			waitForMessageType(client, 'AUTH', this.authentication.timeout).catch((msg: WebSocketMessage) => {
-				const error = new WebSocketException('auth', 'AUTH_TIMEOUT', 'Authentication timed out.', msg.uid);
+				const error = new WebSocketException('auth', 'AUTH_TIMEOUT', 'Authentication timed out.', msg?.uid);
 				handleWebsocketException(client, error);
 				if (this.authentication.mode !== 'public') {
 					client.close();
