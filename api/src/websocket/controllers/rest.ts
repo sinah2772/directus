@@ -26,19 +26,19 @@ export class WebsocketController extends SocketController {
 			try {
 				message = await emitter.emitFilter('websocket.message', message, { client });
 				client.accountability = await refreshAccountability(client.accountability);
-				emitter.emitAction('websocket.message', { message, client });
+				emitter.emitSocket('websocket.message', { message, client });
 			} catch (error) {
 				handleWebsocketException(client, error);
 				return;
 			}
 		});
 		client.on('error', (event: WebSocket.Event) => {
-			emitter.emitAction('websocket.error', { client, event });
+			emitter.emitSocket('websocket.error', { event, client });
 		});
 		client.on('close', (event: WebSocket.CloseEvent) => {
-			emitter.emitAction('websocket.close', { client, event });
+			emitter.emitSocket('websocket.close', { event, client });
 		});
-		emitter.emitAction('websocket.connect', { client });
+		emitter.emitSocket('websocket.connect', { client });
 	}
 	protected override parseMessage(data: string): WebSocketMessage {
 		let message: WebSocketMessage;

@@ -5,7 +5,7 @@ import { validateEnv } from './utils/validate-env.js';
 import type { CacheOptions, CacheService } from './services/cache/cache.js';
 import { RedisCache } from './services/cache/redis-cache.js';
 import { MemCache } from './services/cache/mem-cache.js';
-import {clearSystemCache} from './utils/clearSystemCache.js';
+import { clearSystemCache } from './utils/clearSystemCache.js';
 
 let cache: CacheService | null = null;
 let systemCache: CacheService | null = null;
@@ -34,12 +34,12 @@ export async function flushCaches(forced?: boolean): Promise<void> {
 	await cache?.clear();
 }
 
-function getCacheInstance(ttl: number | undefined, namespaceSuffix: string, checkLock: boolean = false): CacheService {
+function getCacheInstance(ttl: number | undefined, namespaceSuffix: string, checkLock = false): CacheService {
 	const config: CacheOptions = {
 		namespace: `${env['CACHE_NAMESPACE']}${namespaceSuffix}`,
 		ttl,
-		checkLock
-	}
+		checkLock,
+	};
 
 	switch (env['CACHE_STORE']) {
 		case 'redis':

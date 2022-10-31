@@ -1,12 +1,15 @@
 import type { ActionHandler, EventContext, FilterHandler, InitHandler } from '@directus/shared/types';
 import EventEmitter2 from 'eventemitter2';
 import getDatabase from './database';
+import env from './env';
 import logger from './logger.js';
+import { Messenger, MessengerRedis } from './messenger';
 
 export class Emitter {
-	private filterEmitter;
-	private actionEmitter;
-	private initEmitter;
+	protected filterEmitter;
+	protected actionEmitter;
+	protected initEmitter;
+	protected socketEmitter;
 
 	constructor() {
 		const emitterOptions = {
@@ -21,9 +24,10 @@ export class Emitter {
 		this.filterEmitter = new EventEmitter2(emitterOptions);
 		this.actionEmitter = new EventEmitter2(emitterOptions);
 		this.initEmitter = new EventEmitter2(emitterOptions);
+		this.socketEmitter = new EventEmitter2(emitterOptions);
 	}
 
-	private getDefaultContext(): EventContext {
+	protected getDefaultContext(): EventContext {
 		return {
 			database: getDatabase(),
 			accountability: null,
@@ -77,6 +81,17 @@ export class Emitter {
 		}
 	}
 
+	public emitSocket(event: string | string[], meta: Record<string, any>): void {
+		const events = Array.isArray(event) ? event : [event];
+
+		for (const event of events) {
+			this.actionEmitter.emitAsync(event, { event, ...meta }, this.getDefaultContext()).catch((err) => {
+				logger.warn(`An error was thrown while executing socket event "${event}"`);
+				logger.warn(err);
+			});
+		}
+	}
+
 	public onFilter(event: string, handler: FilterHandler): void {
 		this.filterEmitter.on(event, handler);
 	}
@@ -87,6 +102,10 @@ export class Emitter {
 
 	public onInit(event: string, handler: InitHandler): void {
 		this.initEmitter.on(event, handler);
+	}
+
+	public onSocket(event: string, handler: ActionHandler): void {
+		this.socketEmitter.on(event, handler);
 	}
 
 	public offFilter(event: string, handler: FilterHandler): void {
@@ -101,13 +120,58 @@ export class Emitter {
 		this.initEmitter.off(event, handler);
 	}
 
+	public offSocket(event: string, handler: ActionHandler): void {
+		this.socketEmitter.off(event, handler);
+	}
+
 	public offAll(): void {
 		this.filterEmitter.removeAllListeners();
 		this.actionEmitter.removeAllListeners();
 		this.initEmitter.removeAllListeners();
+		this.socketEmitter.removeAllListeners();
 	}
 }
 
-const emitter = new Emitter();
+export class DistributedEmitter extends Emitter {
+	messenger: Messenger;
+
+	constructor() {
+		super();
+		this.messenger = new MessengerRedis();
+		this.messenger.subscribe('events.action', (payload) => {
+			if (payload?.['event']) {
+				const { event, meta, context } = payload;
+				const events = Array.isArray(event) ? event : [event];
+				for (const event of events) {
+					this.actionEmitter.emitAsync(event, { event, ...meta }, context ?? this.getDefaultContext()).catch((err) => {
+						logger.warn(`An error was thrown while executing action "${event}"`);
+						logger.warn(err);
+					});
+				}
+			}
+		});
+	}
+
+	// only actions can be distributed for now
+	public override emitAction(
+		event: string | string[],
+		meta: Record<string, any>,
+		_context: EventContext | null = null
+	): void {
+		this.messenger.publish('events.action', {
+			event,
+			meta,
+			// context,
+		});
+	}
+}
+
+let emitter: Emitter;
+if (env['CACHE_STORE'] === 'redis') {
+	// Redis is required for PubSub across nodes
+	emitter = new DistributedEmitter();
+} else {
+	emitter = new Emitter();
+}
 
 export default emitter;

@@ -171,7 +171,7 @@ export default abstract class SocketController {
 			client.accountability = accountability;
 			client.expiresAt = expiresAt;
 			this.setTokenExpireTimer(client);
-			emitter.emitAction('websocket.auth.success', { client });
+			emitter.emitSocket('websocket.auth.success', { client });
 			if (this.authentication.verbose) {
 				client.send(authenticationSuccess(message.uid));
 			}
@@ -179,7 +179,7 @@ export default abstract class SocketController {
 			return;
 		} catch (error) {
 			this.log(`${client.accountability?.user || 'public user'} failed authentication`);
-			emitter.emitAction('websocket.auth.failure', { client });
+			emitter.emitSocket('websocket.auth.failure', { client });
 
 			client.accountability = null;
 			client.expiresAt = null;
