@@ -8,23 +8,24 @@ import { refreshAccountability } from '../authenticate';
 import { MetaService } from '../../services';
 import { sanitizeQuery } from '../../utils/sanitize-query';
 import { handleWebsocketException, WebSocketException } from '../exceptions';
-import type { Accountability, SchemaOverview } from '@directus/shared/types';
+import type { Accountability, PrimaryKey, SchemaOverview } from '@directus/shared/types';
 
 type UserFocus = {
 	user: string;
 	collection: string;
-	item: string | number;
+	item?: string | number;
+	field?: string;
 };
 
 export class SubscribeHandler {
 	subscriptions: Record<string, Set<Subscription>>;
 	onlineStatus: Set<string>;
-	userFocus: Set<UserFocus>;
+	userFocus: Record<string, UserFocus>;
 
 	constructor() {
 		this.subscriptions = {};
 		this.onlineStatus = new Set();
-		this.userFocus = new Set();
+		this.userFocus = {};
 		this.bindWebsocket();
 		this.bindModules([
 			'items',
@@ -57,10 +58,12 @@ export class SubscribeHandler {
 		emitter.onAction('websocket.error', ({ client }) => {
 			this.userOffline(client);
 			this.unsubscribe(client);
+			this.removeFocus(client);
 		});
 		emitter.onAction('websocket.close', ({ client }) => {
 			this.userOffline(client);
 			this.unsubscribe(client);
+			this.removeFocus(client);
 		});
 		emitter.onAction('websocket.auth.success', ({ client }) => {
 			this.userOnline(client);
@@ -98,7 +101,7 @@ export class SubscribeHandler {
 			const subscription = this.getSubscription(uid);
 			if (subscription && subscription.client === client) {
 				this.subscriptions[subscription.collection]?.delete(subscription);
-				this.removeFocus(client, subscription);
+				// this.removeFocus(client, subscription);
 				this.dispatch(subscription.collection, { action: 'focus' });
 			} else {
 				// logger.warn(`Couldn't find subscription with UID="${uid}" for current user`);
@@ -111,7 +114,6 @@ export class SubscribeHandler {
 					if (!subscription) continue;
 					if (subscription.client === client && (!uid || subscription.uid === uid)) {
 						this.subscriptions[key]?.delete(subscription);
-						this.removeFocus(client, subscription);
 						this.dispatch(subscription.collection, { action: 'focus' });
 					}
 				}
@@ -122,7 +124,7 @@ export class SubscribeHandler {
 		const subscriptions = this.subscriptions[collection] ?? new Set();
 		for (const subscription of subscriptions) {
 			const { client } = subscription;
-			if (data['action'] === 'focus' && !(subscription.status && 'item' in subscription)) {
+			if (data['action'] === 'focus' && !subscription.status) {
 				continue; // skip focus updates if not applicable
 			}
 			if (
@@ -142,6 +144,7 @@ export class SubscribeHandler {
 						: await this.getMultiPayload(subscription, accountability, schema, data['action']);
 				client.send(fmtMessage('subscription', result, subscription.uid));
 			} catch (err) {
+				// console.error(err);
 				handleWebsocketException(client, err, 'subscribe');
 				// logger.debug(`[WS REST] ERROR ${JSON.stringify(err)}`);
 			}
@@ -154,7 +157,8 @@ export class SubscribeHandler {
 				const collection = message.collection!;
 				const accountability = client.accountability;
 				const schema = await getSchema(accountability ? { accountability } : {});
-				if (!(await schema.hasCollection(collection))) {
+				// console.log(accountability, JSON.stringify(schema, null, 2));
+				if (!accountability?.admin && !(await schema.hasCollection(collection))) {
 					throw new WebSocketException(
 						'subscribe',
 						'INVALID_COLLECTION',
@@ -198,6 +202,9 @@ export class SubscribeHandler {
 		if (message.type === 'UNSUBSCRIBE') {
 			this.unsubscribe(client, message.uid);
 		}
+		if (message.type === 'FOCUS') {
+			this.addFocus(client, message);
+		}
 	}
 	private async getSinglePayload(
 		subscription: Subscription,
@@ -216,7 +223,7 @@ export class SubscribeHandler {
 			result['meta'] = await metaService.getMetaForQuery(subscription.collection, query);
 		}
 		if (subscription.status) {
-			const focus = Array.from(this.userFocus)
+			const focus = Object.values(this.userFocus)
 				.filter(({ collection, item }) => collection === subscription.collection && item === subscription.item)
 				.map(({ user }) => user);
 			result['status'] = { focus: Array.from(new Set(focus)) };
@@ -229,6 +236,7 @@ export class SubscribeHandler {
 		schema: SchemaOverview,
 		event = 'init'
 	): Promise<Record<string, any>> {
+		// console.error('test', subscription.collection, accountability);
 		const service = new ItemsService(subscription.collection, { schema, accountability });
 		const metaService = new MetaService({ schema, accountability });
 		const query = subscription.query ?? {};
@@ -237,8 +245,13 @@ export class SubscribeHandler {
 		if ('meta' in query) {
 			result['meta'] = await metaService.getMetaForQuery(subscription.collection, query);
 		}
-		if (subscription.collection === 'directus_users' && subscription.status) {
-			result['status'] = { online: Array.from(this.onlineStatus) };
+		if (subscription.status) {
+			result['status'] = {};
+			if (subscription.collection === 'directus_users') {
+				result['status'].online = Array.from(this.onlineStatus);
+			}
+			const focus = Object.values(this.userFocus).filter(({ collection }) => collection === subscription.collection);
+			result['status'].focus = focus;
 		}
 		return result;
 	}
@@ -252,21 +265,16 @@ export class SubscribeHandler {
 		}
 		return undefined;
 	}
-	private addFocus(client: WebSocketClient, subscription: Subscription) {
-		if (!client.accountability?.user || !subscription.item) return;
-		this.userFocus.add({
-			user: client.accountability.user,
-			collection: subscription.collection,
-			item: subscription.item,
-		} as UserFocus);
+	private addFocus(client: WebSocketClient, opts: { collection: string; item?: PrimaryKey; field?: string }) {
+		if (!client.accountability?.user) return;
+		this.userFocus[client.accountability.user] = { user: client.accountability.user, ...opts } as UserFocus;
+		this.dispatch(opts.collection, { action: 'focus' });
 	}
-	private removeFocus(client: WebSocketClient, subscription: Subscription) {
-		if (!client.accountability?.user || !subscription.item) return;
-		this.userFocus.delete({
-			user: client.accountability.user,
-			collection: subscription.collection,
-			item: subscription.item,
-		} as UserFocus);
+	private removeFocus(client: WebSocketClient) {
+		if (!client.accountability?.user || !this.userFocus[client.accountability.user]?.collection) return;
+		const collection = this.userFocus[client.accountability.user]!.collection;
+		delete this.userFocus[client.accountability.user];
+		this.dispatch(collection, { action: 'focus' });
 	}
 	private userOnline(client: WebSocketClient) {
 		const userId = client.accountability?.user;

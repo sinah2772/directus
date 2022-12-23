@@ -41,7 +41,7 @@ export function useSystem(): void {
 		useFlowsStore,
 	});
 
-	provide(WEBSOCKET_INJECT, getWebSocket)
+	provide(WEBSOCKET_INJECT, getWebSocket);
 
 	provide(API_INJECT, api);
 

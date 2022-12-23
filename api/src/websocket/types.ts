@@ -49,7 +49,8 @@ export type SubscribeMessage =
 			query?: Query;
 			uid?: string;
 	  }
-	| { type: 'UNSUBSCRIBE'; uid?: string };
+	| { type: 'UNSUBSCRIBE'; uid?: string }
+	| { type: 'FOCUS'; collection: string; item?: string | number; field?: string };
 
 export type AuthMessage =
 	| { type: 'AUTH'; email: string; password: string; uid?: string }

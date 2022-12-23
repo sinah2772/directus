@@ -36,7 +36,7 @@ type ComputedQuery = {
 export function useItems(collection: Ref<string | null>, query: ComputedQuery, fetchOnInit = true): UsableItems {
 	const api = useApi();
 	const { primaryKeyField } = useCollection(collection);
-	
+
 	const { fields, alias, limit, sort, search, filter, page } = query;
 
 	const endpoint = computed(() => {
@@ -61,7 +61,7 @@ export function useItems(collection: Ref<string | null>, query: ComputedQuery, f
 
 	let currentRequest: CancelTokenSource | null = null;
 	let loadingTimeout: NodeJS.Timeout | null = null;
-	let webSocketsActive = false
+	let webSocketsActive = false;
 
 	const finalQuery = computed(() => {
 		let fieldsToFetch = [...(unref(fields) ?? [])];
@@ -88,8 +88,8 @@ export function useItems(collection: Ref<string | null>, query: ComputedQuery, f
 			search: unref(search) ?? null,
 			filter: unref(filter) ?? null,
 			meta: ['filter_count', 'total_count'],
-		}
-	})
+		};
+	});
 
 	const fetchItems = throttle(getItems, 500);
 
@@ -127,32 +127,39 @@ export function useItems(collection: Ref<string | null>, query: ComputedQuery, f
 		{ deep: true, immediate: true }
 	);
 
-	const ws = getWebSocket()
+	const ws = getWebSocket();
 
-	let subscriptionId: number | null = null
+	let subscriptionId: number | null = null;
 
 	ws.onConnect((client) => {
-		watch([collection, finalQuery], ([newCollection, newQuery]) => {
-			if(subscriptionId !== null) client.unsubscribe(subscriptionId);
+		watch(
+			[collection, finalQuery],
+			([newCollection, newQuery]) => {
+				if (subscriptionId !== null) client.unsubscribe(subscriptionId);
 
-			subscriptionId = client.subscribe({
-				collection: newCollection!,
-				query: newQuery
-			}, (data) => {
-				onItemChange({data: data['payload'], meta: data['meta']})
-			})
-		}, {immediate: true})
+				subscriptionId = client.subscribe(
+					{
+						collection: newCollection!,
+						query: newQuery,
+					},
+					(data) => {
+						onItemChange({ data: data['payload'], meta: data['meta'] });
+					}
+				);
+			},
+			{ immediate: true }
+		);
 
-		webSocketsActive = true
+		webSocketsActive = true;
 
 		onUnmounted(() => {
-			if(subscriptionId !== null) client.unsubscribe(subscriptionId);
-		})
-	})
+			if (subscriptionId !== null) client.unsubscribe(subscriptionId);
+		});
+	});
 
 	ws.onDisconnect(() => {
-		webSocketsActive = false
-	})
+		webSocketsActive = false;
+	});
 
 	return { itemCount, totalCount, items, totalPages, loading, error, changeManualSort, getItems };
 
@@ -195,9 +202,10 @@ export function useItems(collection: Ref<string | null>, query: ComputedQuery, f
 		}
 	}
 
-	function onItemChange(data: {data: Record<string, any>[], meta: Record<string, any>}) {
+	function onItemChange(data: { data: Record<string, any>[]; meta: Record<string, any> }) {
+		// console.log('onItemChange', data);
+		if (!data.data) return;
 		let fetchedItems = data.data;
-
 		/**
 		 * @NOTE
 		 *
@@ -216,8 +224,8 @@ export function useItems(collection: Ref<string | null>, query: ComputedQuery, f
 		}
 
 		items.value = fetchedItems;
-		totalCount.value = data.meta?.['total_count']!;
-		itemCount.value = data.meta?.['filter_count']!;
+		totalCount.value = data.meta?.['total_count'] ?? null;
+		itemCount.value = data.meta?.['filter_count'] ?? null;
 
 		if (page && fetchedItems['length'] === 0 && page?.value !== 1) {
 			page.value = 1;

@@ -216,7 +216,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref, unref, toRefs } from 'vue';
+import { computed, ref, unref, toRefs, onMounted, onUnmounted, watch, Ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import { useEditsGuard } from '@/composables/use-edits-guard';
@@ -235,6 +235,8 @@ import { useCollection } from '@directus/shared/composables';
 import { useRouter } from 'vue-router';
 import ContentNavigation from '../components/navigation.vue';
 import ContentNotFound from './not-found.vue';
+import { getWebSocket } from '@/websocket';
+import { MessageCallback, PrimaryKey, WebSocketClient } from '@directus/shared/types';
 
 interface Props {
 	collection: string;
@@ -278,6 +280,72 @@ const {
 	refresh,
 	validationErrors,
 } = useItem(collection, primaryKey);
+
+const ws = getWebSocket();
+let subscriptionId: number | null = null,
+	webSocketsActive = false;
+ws.onConnect((client) => {
+	// console.log('connect');
+	watch(
+		[collection, primaryKey],
+		([newCollection, pkVal]) => {
+			// console.log('watch', newCollection, pkVal);
+			if (subscriptionId !== null) client.unsubscribe(subscriptionId);
+			if (!newCollection || pkVal === null) return;
+
+			subscriptionId = client.subscribe(
+				{
+					type: 'SUBSCRIBE',
+					query: { fields: [] },
+					collection: 'directus_users',
+					item: pkVal!,
+					status: true,
+				},
+				(data) => {
+					// console.error(data);
+				}
+			);
+		},
+		{ immediate: true }
+	);
+
+	webSocketsActive = true;
+
+	onUnmounted(() => {
+		if (subscriptionId !== null) client.unsubscribe(subscriptionId);
+	});
+});
+
+ws.onDisconnect(() => {
+	webSocketsActive = false;
+});
+// const x = useSubscription([collection, primaryKey], ());
+// function useSubscription(options: SubscribeOptions, callback: MessageCallback) {
+
+// }
+
+// function useFocus(collection: Ref<string>, id: Ref<string | null>) {
+// 	const wrap = getWebSocket();
+// 	let uid: number | undefined, ws: WebSocketClient;
+// 	wrap.onConnect((ws) => {});
+// 	wrap.onDisconnect(() => {});
+// 	watch(
+// 		[collection, id],
+// 		() => {
+// 			uid = ws.subscribe(
+// 				{
+// 					collection: collection.value,
+// 					item: unref(id)!,
+// 				},
+// 				(data) => {
+// 					console.error(data);
+// 				}
+// 			);
+// 		},
+// 		{ immediate: true }
+// 	);
+// 	onUnmounted(() => {});
+// }
 
 const { templateData, loading: templateDataLoading } = useTemplateData(collectionInfo, primaryKey);
 

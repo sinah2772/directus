@@ -14,7 +14,9 @@ export function useStores(): Record<string, any> {
 export function getWebSocket(): WebSocketWrapper {
 	const websocket = inject<() => WebSocketWrapper>(WEBSOCKET_INJECT);
 
-	if (!websocket || typeof websocket !== 'function') throw new Error('[getWebSocket]: The websocket could not be found.');
+	if (!websocket || typeof websocket !== 'function') {
+		throw new Error('[getWebSocket]: The websocket could not be found.');
+	}
 
 	return websocket();
 }
