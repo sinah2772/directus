@@ -159,6 +159,7 @@
 			:fields="fields"
 			:primary-key="internalPrimaryKey"
 			:validation-errors="validationErrors"
+			@focus-field="handleFocus($event)"
 		/>
 
 		<v-dialog v-model="confirmLeave" @esc="confirmLeave = false">
@@ -216,7 +217,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref, unref, toRefs, onMounted, onUnmounted, watch, Ref } from 'vue';
+import { computed, ref, unref, toRefs, onUnmounted, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import { useEditsGuard } from '@/composables/use-edits-guard';
@@ -236,7 +237,7 @@ import { useRouter } from 'vue-router';
 import ContentNavigation from '../components/navigation.vue';
 import ContentNotFound from './not-found.vue';
 import { getWebSocket } from '@/websocket';
-import { MessageCallback, PrimaryKey, WebSocketClient } from '@directus/shared/types';
+import { WebSocketClient } from '@directus/shared/types';
 
 interface Props {
 	collection: string;
@@ -283,7 +284,9 @@ const {
 
 const ws = getWebSocket();
 let subscriptionId: number | null = null,
-	webSocketsActive = false;
+	activeClient: WebSocketClient | false = false;
+// webSocketsActive = false;
+
 ws.onConnect((client) => {
 	// console.log('connect');
 	watch(
@@ -309,16 +312,34 @@ ws.onConnect((client) => {
 		{ immediate: true }
 	);
 
-	webSocketsActive = true;
+	activeClient = client;
 
+	handleFocus(false);
 	onUnmounted(() => {
 		if (subscriptionId !== null) client.unsubscribe(subscriptionId);
+		client.send('BLUR', {}, false);
 	});
 });
 
 ws.onDisconnect(() => {
-	webSocketsActive = false;
+	activeClient = false;
 });
+
+function handleFocus(field: string | false) {
+	// console.log('handleFocus', field);
+	if (activeClient && props.primaryKey && props.primaryKey !== '+') {
+		activeClient.send(
+			'FOCUS',
+			{
+				collection: props.collection,
+				item: props.primaryKey,
+				field,
+			},
+			false
+		);
+	}
+}
+
 // const x = useSubscription([collection, primaryKey], ());
 // function useSubscription(options: SubscribeOptions, callback: MessageCallback) {
 

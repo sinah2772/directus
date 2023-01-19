@@ -52,6 +52,17 @@ export type SubscribeMessage =
 	| { type: 'UNSUBSCRIBE'; uid?: string }
 	| { type: 'FOCUS'; collection: string; item?: string | number; field?: string };
 
+export type FocusMessage =
+	| {
+			type: 'FOCUS';
+			collection: string;
+			item: string;
+			field: string | false;
+	  }
+	| {
+			type: 'BLUR';
+	  };
+
 export type AuthMessage =
 	| { type: 'AUTH'; email: string; password: string; uid?: string }
 	| { type: 'AUTH'; access_token: string; uid?: string }

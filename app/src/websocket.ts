@@ -56,7 +56,7 @@ function connectWebSocket() {
 		retryConnection();
 	};
 
-	ws.onerror = (error) => {
+	ws.onerror = (_error) => {
 		// console.error(error);
 		ws?.close();
 	};
@@ -95,11 +95,11 @@ async function authenticate(ws: WebSocket) {
 		});
 		// console.log('Authenticated', response);
 
-		if (response['status'] === 'ok') {
+		if (response?.['status'] === 'ok') {
 			onAuthCallbacks.forEach((callback) => callback());
 		}
 
-		if (response['status'] === 'error') {
+		if (response?.['status'] === 'error') {
 			// console.error('Authentication failed', response['error']);
 			//TODO: Handle token expiration
 			authenticated = false;
@@ -116,7 +116,7 @@ export function getWebSocket() {
 	return new Wrapper();
 }
 
-class Wrapper implements WebSocketWrapper {
+export class Wrapper implements WebSocketWrapper {
 	connectCallbacks = new Set<(client: WebSocketClient) => void>();
 	disconnectCallbacks = new Set<() => void>();
 
@@ -183,9 +183,13 @@ class Client implements WebSocketClient {
 		this.ws.send(JSON.stringify({ type: 'UNSUBSCRIBE', uid }));
 	}
 
-	send(type: MessageType, data: Record<string, any> = {}, timeout = 5000) {
-		const counter = uidCounter.next().value;
+	send(type: MessageType, data: Record<string, any> = {}, timeout: number | false = 5000) {
+		if (timeout === false) {
+			// dont wait for response
+			return this.ws.send(JSON.stringify({ ...data, type }));
+		}
 
+		const counter = uidCounter.next().value;
 		return new Promise<Record<string, any>>((resolve, reject) => {
 			onMessageCallbacks.set(counter, (data) => {
 				onMessageCallbacks.delete(counter);
