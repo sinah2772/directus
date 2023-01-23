@@ -48,7 +48,7 @@
 					}
 				"
 				:class="index === firstVisibleFieldIndex ? 'first-visible-field' : ''"
-				:field="fieldsMap[fieldName] || {}"
+				:field="fieldsMap[fieldName] || ({} as Field)"
 				:autofocus="index === firstEditableFieldIndex && autofocus"
 				:model-value="(values || {})[fieldName]"
 				:initial-value="(initialValues || {})[fieldName]"
@@ -75,6 +75,14 @@
 				@toggle-raw="toggleRawField(fieldsMap[fieldName])"
 				@set-focus="$emit('focusField', $event)"
 			/>
+
+			<v-avatar v-if="!!collaboration[fieldName]" x-small>
+				<v-image
+					v-if="collaboration[fieldName].avatar"
+					:src="'/assets/' + collaboration[fieldName].avatar + '?key=system-small-cover'"
+				/>
+				<v-icon v-else name="person_outline" />
+			</v-avatar>
 		</template>
 		<v-divider v-if="showDivider && !noVisibleFields" />
 	</div>
@@ -115,6 +123,7 @@ interface Props {
 	rawEditorEnabled?: boolean;
 	direction?: string;
 	showDivider?: boolean;
+	collaboration?: Record<string, { user: string; name: string; avatar: string }>;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -134,6 +143,7 @@ const props = withDefaults(defineProps<Props>(), {
 	rawEditorEnabled: false,
 	direction: undefined,
 	showDivider: false,
+	collaboration: () => ({}),
 });
 
 const { t } = useI18n();
@@ -145,6 +155,9 @@ const values = computed(() => {
 });
 
 const el = ref<Element>();
+
+// watch(() => props.collaboration, v => console.log('collab', v));
+// console.log('collaboration', props.collaboration);
 
 const { width } = useElementSize(el);
 
